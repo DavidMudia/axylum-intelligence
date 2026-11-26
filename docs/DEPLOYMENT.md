@@ -69,6 +69,20 @@ This repository does **not** create a VPS, register a domain, configure DNS, or 
 
 Suggested starting VPS: 2+ vCPU, 4+ GB RAM and SSD storage sized for retained candles/trades/order-book data and backups. Actual disk growth depends on ingestion duration and retention policy; no automatic market-data deletion is configured. Choose a VPS with enough disk and monitor it. A public deployment URL is not available until you provision DNS and the server.
 
+## Vercel web app with Neon PostgreSQL
+
+Vercel can host the Next.js web app and API routes, and Neon can host PostgreSQL. This supports Axylum account registration and sign-in, but Vercel does not run the continuous Binance collector or paper-trading worker. Run those workers on a separate always-on host before expecting live ingestion or autonomous paper trading.
+
+1. Link the GitHub repository to a Vercel project. Keep the project root at the repository root and leave the Next.js output directory on **Automatic**.
+2. In Vercel **Settings → Environment Variables**, set the following for Production (and Preview only if you intend to use the same Neon database there):
+   - `DATABASE_URL` — Neon’s pooled connection URL. This is the app’s runtime connection.
+   - `AUTH_BOOTSTRAP_ADMIN_SECRET` — generate a new value with `openssl rand -hex 32`. Use it for the first production administrator account, then remove it from Vercel after signup.
+3. Keep the URL and setup secret server-side. Do not use `NEXT_PUBLIC_` or `VITE_` prefixes. Axylum continues to use its existing email/password and role system; the separately enabled Neon Auth service is not the app’s active identity provider.
+4. The checked-in database migrations must be applied to the Neon branch before first use. For future schema changes, set `DATABASE_URL_UNPOOLED` to Neon’s direct connection URL in a trusted local shell and run `npm run db:migrate`. Do not use the pooled URL for migrations.
+5. Deploy from the linked GitHub branch. Open the Vercel URL, choose **Sign up**, create the first account with the one-time setup code, and verify you can sign out and sign back in. Remove `AUTH_BOOTSTRAP_ADMIN_SECRET` from Vercel once the administrator account is created.
+
+Only the pooled URL and bootstrap secret are required by the Vercel web runtime. `DATABASE_URL_UNPOOLED` is for trusted migrations and long-lived worker advisory locks, not a browser variable. Do not configure the local Docker Compose database URL (`@db:5432`) in Vercel.
+
 ## First VPS deployment
 
 ### 1. Prepare the host

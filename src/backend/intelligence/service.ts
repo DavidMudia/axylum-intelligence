@@ -19,7 +19,17 @@ import { DEFAULT_RISK_CONFIG, type RiskConfig } from "./risk";
 export const PAPER_ACCOUNT_ID = "btc-paper-usdt";
 export const RISK_CONFIG_ID = "btc-spot-default";
 export const PAPER_STARTING_BALANCE = 100_000;
+const MIN_ANALYSIS_CANDLES = 20;
 export { DEFAULT_RISK_CONFIG };
+
+export class InsufficientClosedCandlesError extends Error {
+  readonly requiredCandles = MIN_ANALYSIS_CANDLES;
+
+  constructor(readonly availableCandles: number) {
+    super(`Market intelligence is waiting for closed BTCUSDT candles (${availableCandles}/${MIN_ANALYSIS_CANDLES}). Start the Binance market-data collector.`);
+    this.name = "InsufficientClosedCandlesError";
+  }
+}
 
 function asCandleInput(candle: Awaited<ReturnType<typeof getCandles>>[number]): CandleInput {
   return {
@@ -79,7 +89,7 @@ export async function getRiskConfig(): Promise<RiskConfig> {
 export async function getMarketAnalysis(symbol = "BTCUSDT", interval = "1m") {
   if (symbol !== "BTCUSDT") throw new RangeError("Phase 2 currently supports BTCUSDT only");
   const candles = (await getCandles(symbol, interval, 500)).filter((candle) => candle.isClosed).map(asCandleInput);
-  if (candles.length < 20) throw new Error("Insufficient closed BTCUSDT candles for analysis");
+  if (candles.length < MIN_ANALYSIS_CANDLES) throw new InsufficientClosedCandlesError(candles.length);
   const orderBook = await getLatestOrderBookSnapshot(symbol);
   const analysis = analyzeMarket(symbol, interval, candles, orderBook ?? undefined);
   await db.insert(marketAnalyses).values({

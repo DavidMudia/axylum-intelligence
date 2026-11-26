@@ -2,20 +2,11 @@
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useUI } from "@/stores/ui";
+import { readAuthResponse, type AuthApiResponse } from "@/lib/auth-response";
 
 type SessionState = "checking" | "authenticated" | "signed-out";
 type AuthMode = "login" | "signup" | "operator";
 type AuthUser = { email: string; role: string };
-type SessionResponse = {
-  authenticated: boolean;
-  user?: AuthUser;
-  signupAvailable?: boolean;
-  bootstrapRequired?: boolean;
-  bootstrapConfigured?: boolean;
-  bootstrapAvailable?: boolean;
-  operatorLoginAvailable?: boolean;
-  error?: string;
-};
 
 export function OperatorGate({ children }: { children: ReactNode }) {
   const refreshSystem = useUI((state) => state.refreshSystem);
@@ -37,7 +28,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       void fetch("/api/auth/session", { cache: "no-store" })
         .then(async (response) => {
-          const result = await response.json() as SessionResponse;
+          const result = await readAuthResponse(response);
           if (!response.ok) throw new Error(result.error ?? "Unable to check your sign-in status");
           setBootstrapRequired(result.bootstrapRequired ?? false);
           setBootstrapConfigured(result.bootstrapConfigured ?? true);
@@ -81,7 +72,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json() as SessionResponse;
+      const result: AuthApiResponse = await readAuthResponse(response);
       if (!response.ok) throw new Error(result.error ?? "Sign-in failed");
       setUser(result.user ?? (mode === "operator" ? { email: username, role: "admin" } : null));
       setPassword("");

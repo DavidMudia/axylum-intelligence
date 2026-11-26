@@ -37,6 +37,8 @@ Use the production Compose stack in [the deployment guide](./docs/DEPLOYMENT.md)
 
 The VPS, domain and DNS are not configured by this repository. A public deployment requires the operator to provision those resources and configure production secrets.
 
+For a Vercel-hosted web app with Neon PostgreSQL, see the Vercel + Neon instructions in [the deployment guide](./docs/DEPLOYMENT.md). Account registration and sign-in work on that deployment; continuous Binance collection and paper trading still require a separate always-on worker host.
+
 ## Useful checks
 
 ```sh
