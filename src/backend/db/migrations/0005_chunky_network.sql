@@ -1,0 +1,1 @@
+ALTER TABLE "exchange_connections" ADD COLUMN "encryption_version" integer DEFAULT 1 NOT NULL;

@@ -29,6 +29,34 @@
       "when": 1795645530150,
       "tag": "0003_fluffy_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795681655284,
+      "tag": "0004_large_impossible_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795682347948,
+      "tag": "0005_chunky_network",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795682862050,
+      "tag": "0006_tranquil_stick",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795682965739,
+      "tag": "0007_panoramic_yellowjacket",
+      "breakpoints": true
     }
   ]
 }

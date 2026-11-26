@@ -36,23 +36,6 @@ function parseCookie(request: Request, name: string): string | null {
   return null;
 }
 
-function hasValidSession(request: Request): boolean {
-  const { secret } = productionAuthConfig();
-  const value = parseCookie(request, COOKIE_NAME);
-  if (!value) return false;
-  const [payload, suppliedSignature, extra] = value.split(".");
-  if (!payload || !suppliedSignature || extra) return false;
-  const expected = signature(payload, secret);
-  if (!secureEqual(expected, suppliedSignature)) return false;
-  try {
-    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: number };
-    const { username } = productionAuthConfig();
-    return decoded.sub === username && typeof decoded.exp === "number" && decoded.exp > Math.floor(Date.now() / 1000);
-  } catch {
-    return false;
-  }
-}
-
 function isSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return process.env.NODE_ENV !== "production";
@@ -70,48 +53,88 @@ function isSameOrigin(request: Request): boolean {
   }
 }
 
+function hasValidSession(request: Request): boolean {
+  const { secret } = productionAuthConfig();
+  const value = parseCookie(request, COOKIE_NAME);
+  if (!value) return false;
+  const [payload, suppliedSignature, extra] = value.split(".");
+  if (!payload || !suppliedSignature || extra) return false;
+  const expected = signature(payload, secret);
+  if (!secureEqual(expected, suppliedSignature)) return false;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { sub?: string; exp?: number };
+    const { username } = productionAuthConfig();
+    return decoded.sub === username && typeof decoded.exp === "number" && decoded.exp > Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
+}
+
 export function isOperatorAuthEnabled(): boolean {
-  return process.env.NODE_ENV === "production";
+  return getOperatorAuthStatus().configured;
 }
 
 export function getOperatorAuthStatus(): { required: boolean; configured: boolean; error?: string } {
-  if (!isOperatorAuthEnabled()) return { required: false, configured: true };
+  const required = process.env.NODE_ENV === "production";
   try {
     productionAuthConfig();
-    return { required: true, configured: true };
+    return { required, configured: true };
   } catch (error) {
     return {
-      required: true,
+      required,
       configured: false,
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-export function authorizeOperator(request: Request, mutation = false): Response | null {
-  if (!isOperatorAuthEnabled()) return null;
-  try {
-    productionAuthConfig();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: message, code: "operator_auth_not_configured" }, { status: 503 });
-  }
+export async function authorizeOperator(request: Request, mutation = false): Promise<Response | null> {
+  if (mutation) return authorizeAdministrator(request, true);
+  const legacyOperator = isOperatorAuthEnabled() && hasValidSession(request);
+  if (legacyOperator) return null;
+  const { getSessionUser } = await import("./user-auth");
+  const user = await getSessionUser(request);
+  if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
+  return null;
+}
+
+export async function authorizeAdministrator(request: Request, mutation = false): Promise<Response | null> {
   if (mutation && !isSameOrigin(request)) {
     return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
   }
-  if (!hasValidSession(request)) {
-    return Response.json({ error: "Operator sign-in required" }, { status: 401 });
+  const legacyOperator = isOperatorAuthEnabled() && hasValidSession(request);
+  if (legacyOperator) return null;
+  const { getSessionUser } = await import("./user-auth");
+  const user = await getSessionUser(request);
+  if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
+  if (user.role !== "admin") {
+    return Response.json({ error: "Administrator access required" }, { status: 403 });
   }
   return null;
 }
 
-export function operatorSessionResponse(request: Request): Response {
-  if (!isOperatorAuthEnabled()) return Response.json({ authenticated: true, mode: "local-development" });
-  const authError = authorizeOperator(request);
-  if (authError) {
-    return Response.json({ authenticated: false }, { status: authError.status });
+export async function operatorSessionResponse(request: Request): Promise<Response> {
+  if (isOperatorAuthEnabled() && hasValidSession(request)) {
+    const { username } = productionAuthConfig();
+    return Response.json(
+      { authenticated: true, user: { email: username, role: "admin" }, mode: "legacy-operator" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
-  return Response.json({ authenticated: true, mode: "production" }, { headers: { "Cache-Control": "no-store" } });
+  const { getSessionUser, getSignupStatus } = await import("./user-auth");
+  const user = await getSessionUser(request);
+  if (user) {
+    return Response.json(
+      { authenticated: true, user, mode: isOperatorAuthEnabled() ? "production" : "local-development" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const signup = await getSignupStatus();
+  const operatorAuth = getOperatorAuthStatus();
+  return Response.json(
+    { authenticated: false, ...signup, operatorLoginAvailable: operatorAuth.configured },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export function loginOperator(request: Request, body: { username?: unknown; password?: unknown }): Response {
@@ -146,14 +169,16 @@ export function loginOperator(request: Request, body: { username?: unknown; pass
   failedLogins.delete(address);
 
   const payload = Buffer.from(JSON.stringify({ sub: config.username, exp: Math.floor(Date.now() / 1000) + SESSION_SECONDS })).toString("base64url");
-  const cookie = `${COOKIE_NAME}=${payload}.${signature(payload, config.secret)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_SECONDS}`;
+  const secure = process.env.NODE_ENV === "production" ? " Secure;" : "";
+  const cookie = `${COOKIE_NAME}=${payload}.${signature(payload, config.secret)}; Path=/; HttpOnly;${secure} SameSite=Strict; Max-Age=${SESSION_SECONDS}`;
   return Response.json({ authenticated: true }, { headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } });
 }
 
 export function logoutOperator(): Response {
+  const secure = process.env.NODE_ENV === "production" ? " Secure;" : "";
   return Response.json(
     { authenticated: false },
-    { headers: { "Set-Cookie": `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`, "Cache-Control": "no-store" } },
+    { headers: { "Set-Cookie": `${COOKIE_NAME}=; Path=/; HttpOnly;${secure} SameSite=Strict; Max-Age=0`, "Cache-Control": "no-store" } },
   );
 }
 

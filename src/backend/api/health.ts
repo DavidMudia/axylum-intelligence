@@ -3,7 +3,7 @@ import os from "node:os";
 import { desc, sql } from "drizzle-orm";
 import { db } from "@backend/db";
 import { engineHealth } from "@backend/db/schema";
-import { authorizeOperator, getOperatorAuthStatus, isOperatorAuthEnabled } from "@backend/lib/server/operator-auth";
+import { authorizeOperator } from "@backend/lib/server/operator-auth";
 import { getIngestionStatus } from "@backend/market-data/store";
 
 export const dynamic = "force-dynamic";
@@ -39,17 +39,9 @@ async function getRuntimeMetrics() {
 
 export async function GET(request: Request) {
   try {
-    const operatorAuth = getOperatorAuthStatus();
-    if (!operatorAuth.configured) {
-      return Response.json({
-        database: { state: "unknown" },
-        operatorAuth,
-        error: "Production authentication is not configured.",
-      }, { status: 503 });
-    }
     await db.execute(sql`select 1`);
-    const operatorResponse = authorizeOperator(request);
-    if (isOperatorAuthEnabled() && operatorResponse) {
+    const operatorResponse = await authorizeOperator(request);
+    if (operatorResponse) {
       return Response.json({ ok: true, database: { state: "healthy" }, checkedAt: new Date().toISOString() }, {
         headers: { "Cache-Control": "no-store" },
       });
@@ -64,7 +56,7 @@ export async function GET(request: Request) {
       collector,
       engines,
       metrics,
-      operatorAuth,
+      authentication: { required: true },
       checkedAt: new Date().toISOString(),
     });
   } catch (error) {

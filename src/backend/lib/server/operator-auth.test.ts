@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loginOperator, operatorSessionResponse } from "./operator-auth";
+import { authorizeAdministrator, loginOperator, operatorSessionResponse } from "./operator-auth";
 
-test("production operator login issues a signed secure cookie and rejects cross-origin requests", () => {
+test("production operator login issues a signed secure cookie and rejects cross-origin requests", async () => {
   const previous = {
     nodeEnv: process.env.NODE_ENV,
     username: process.env.ADMIN_USERNAME,
@@ -32,10 +32,22 @@ test("production operator login issues a signed secure cookie and rejects cross-
     assert.equal(response.status, 200);
     const cookie = response.headers.get("set-cookie");
     assert.match(cookie ?? "", /HttpOnly; Secure; SameSite=Strict/);
-    const session = operatorSessionResponse(new Request("https://terminal.example.test/api/auth/session", {
-      headers: { cookie: cookie!.split(";")[0], host: "terminal.example.test" },
-    }));
+    const cookieHeader = cookie!.split(";")[0];
+    const sessionRequest = new Request("https://terminal.example.test/api/auth/session", {
+      headers: { cookie: cookieHeader, host: "terminal.example.test" },
+    });
+    const session = await operatorSessionResponse(sessionRequest);
     assert.equal(session.status, 200);
+    assert.equal((await session.json() as { user: { role: string } }).user.role, "admin");
+
+    const authorized = await authorizeAdministrator(new Request(request.url, {
+      headers: { cookie: cookieHeader, origin: "https://terminal.example.test", host: "terminal.example.test" },
+    }), true);
+    assert.equal(authorized, null);
+    const crossOriginMutation = await authorizeAdministrator(new Request(request.url, {
+      headers: { cookie: cookieHeader, origin: "https://attacker.example", host: "terminal.example.test" },
+    }), true);
+    assert.equal(crossOriginMutation?.status, 403);
   } finally {
     if (previous.nodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
     else Reflect.set(process.env, "NODE_ENV", previous.nodeEnv);

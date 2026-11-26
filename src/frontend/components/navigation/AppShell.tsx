@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { OctagonAlert, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ActivityStream } from "@/components/system-status/ActivityStream";
 import { useUI } from "@/stores/ui";
 import { CommandPalette } from "./CommandPalette";
@@ -11,13 +11,7 @@ import { TopBar } from "./TopBar";
 import { OperatorGate } from "./OperatorGate";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { streamOpen, streamDrawer, setStreamDrawer, mobileNav, setMobileNav, system, refreshSystem } = useUI();
-
-  useEffect(() => {
-    refreshSystem();
-    const t = setInterval(refreshSystem, 15000);
-    return () => clearInterval(t);
-  }, [refreshSystem]);
+  const { streamOpen, streamDrawer, setStreamDrawer, mobileNav, setMobileNav, system } = useUI();
 
   return (
     <div className="flex h-dvh overflow-hidden">

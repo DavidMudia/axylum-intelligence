@@ -13,7 +13,17 @@ For the full experience, PostgreSQL and all three application processes need to 
 
 The API health check is available at `/api/health`. Its public response is intentionally limited to app/database liveness; after production sign-in it also reports collector freshness, order-book sequence status, worker health and application/database resource details. A green web page alone does not mean every collector or worker is healthy.
 
-## Six main sections
+## Sign up and sign in
+
+Choose **Sign up** on the sign-in screen and create an account with an email address and a password of at least 12 characters. Passwords are stored as salted scrypt hashes. Sign-in sessions are stored as revocable database records; the browser receives only an `HttpOnly` session cookie.
+
+On a fresh local database, the first account becomes the administrator unless legacy Operator credentials are configured. In production, the initial administrator uses `AUTH_BOOTSTRAP_ADMIN_SECRET` unless legacy Operator login is configured. Later sign-ups receive a regular-user role. Regular users can view the shared terminal, while system-wide changes require an administrator.
+
+If the database already has an administrator but you cannot access it, there is no pre-issued password to retrieve. Configure a new 64-character hexadecimal `AUTH_BOOTSTRAP_ADMIN_SECRET` in the server environment and restart the app. The sign-up screen will then offer a one-time administrator setup code; create an account with that code to establish another administrator. Remove the configured secret from the environment after it is consumed. The legacy Operator login is also available when its server-side environment credentials are configured.
+
+Email verification and self-service password recovery are not implemented yet. Do not treat open registration as production-ready for a public audience until those account-recovery and abuse-protection controls are added. Never share passwords or setup codes in chat.
+
+## Main sections
 
 ### Overview
 
@@ -33,6 +43,10 @@ The bid/ask spread is available only when an order-book snapshot is stored. Cand
 
 Review current calculated analysis and persisted strategy decisions. A decision includes its action (`BUY`, `SELL` or `HOLD`), strategy, status, explanation, evidence, regime and confidence. `HOLD` is normal: it means the rules did not justify an entry/exit. Decisions are not financial advice or promises of future performance.
 
+### Knowledge Graph
+
+Open **Knowledge Graph** from the sidebar to explore and query example entities and relationships. The graph is currently seeded illustrative content: its nodes, evidence labels, confidence values and time filters are not live market, on-chain or news observations. “Verified” and “inferred” describe the examples only; they are not validation of live facts.
+
 ### Strategy Lab
 
 The initial catalog contains:
@@ -48,7 +62,7 @@ Backtests are hypothetical, depend on the execution assumptions and do not guara
 
 ### Trading
 
-The account is simulated USDT only. It displays cash, equity, realized/unrealized P&L, exposure, fees/slippage, positions, recent orders and decisions.
+The current paper portfolio is a shared system simulation in USDT, not a private per-user portfolio. It displays cash, equity, realized/unrealized P&L, exposure, fees/slippage, positions, recent orders and decisions.
 
 1. In Strategy Lab, review the rules and activate only the strategy you intend to test.
 2. Review and save the risk limits. Defaults are conservative paper-only values: `0.5%` maximum equity risk per entry, `2%` daily loss, `10%` drawdown, `10%` position size, one concurrent position and at least `2:1` reward/risk.
@@ -74,11 +88,14 @@ Application resource data is for the web process/container; use Docker/VPS monit
 | No order after starting | The strategy may correctly be holding; review Intelligence decisions and active strategy status. |
 | Rejected paper order | Read its recorded risk details; adjust valid settings only if appropriate. Limits are intentionally enforced server-side. |
 | Collector reconnecting / unhealthy book sequence | Check DNS/network access to Binance and worker logs; the collector retries and resynchronizes its order-book snapshot. |
-| Production sign-in unavailable | Check that `ADMIN_USERNAME`, `ADMIN_PASSWORD` and a 32+ character `AUTH_SESSION_SECRET` are set in the server-only environment file. |
+| Sign-in or sign-up reports a database error | Apply migrations and check PostgreSQL availability. |
+| First production sign-up requires a setup code | Configure `AUTH_BOOTSTRAP_ADMIN_SECRET` in the server environment and use that value only in the first-admin setup form. |
+| You signed up but cannot manage system settings | Standard sign-ups are read-only. If you have lost access to the existing administrator, use the one-time setup-code recovery steps above. |
 
 ## Safe operating reminders
 
 - No Binance API key is needed for public Spot data or paper mode.
+- User registration and database-backed sessions are available, but exchange-connection screens and private Binance account reads are not implemented yet. The schema foundations are in place; do not enter or send API keys until the in-app connection flow is available.
 - Never enable Binance trading permissions for this application.
 - Never put database or operator credentials into browser code or public client variables.
 - Do not infer strategy profitability from a single backtest or a short live observation period.

@@ -63,7 +63,7 @@ npm run build
 
 Both workers take PostgreSQL advisory locks so a second copy cannot run concurrently. Paper execution also has unique decision/order IDs and transaction-bound risk/account updates. Docker restarts processes after failures and host restarts; the workers resume from PostgreSQL state.
 
-Secrets are passed only to the containers that need them: the web service receives operator/database credentials; the market-data and paper workers receive the database URL and their runtime settings; Caddy receives only the public domain; PostgreSQL and the backup service receive the database credentials.
+Secrets are passed only to the containers that need them: the web service receives database/authentication configuration; the market-data and paper workers receive the database URL and their runtime settings; Caddy receives only the public domain; PostgreSQL and the backup service receive database credentials.
 
 This repository does **not** create a VPS, register a domain, configure DNS, or open a provider firewall. A deployment needs a Linux VPS, a domain/subdomain you control, DNS A/AAAA records pointing to the VPS, SSH access and the operator to apply provider/security changes.
 
@@ -95,8 +95,9 @@ openssl rand -hex 32
 Edit `.env.production`:
 
 - Set `DOMAIN` to the DNS hostname.
-- Set a unique long `ADMIN_PASSWORD`.
-- Set `AUTH_SESSION_SECRET` to the output of `openssl rand -hex 32` (64 hex characters).
+- Set `AUTH_BOOTSTRAP_ADMIN_SECRET` to a new `openssl rand -hex 32` value. Use it once to create the first administrator account, or to recover admin access if the database already contains an inaccessible administrator. Remove it from the server environment after use.
+- Leave `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `AUTH_SESSION_SECRET` blank unless you explicitly want the legacy Operator login.
+- `EXCHANGE_CREDENTIALS_ENCRYPTION_KEY` is reserved for the future exchange connection API; it is not used yet and no exchange keys should be entered.
 - Generate a separate database password and set both `POSTGRES_PASSWORD` and the matching password inside `DATABASE_URL`. URL-encode any reserved characters; a generated hex password avoids reserved-character encoding.
 - Keep `DATABASE_URL` host set to `db`, not `localhost`.
 - Leave Binance Spot URLs public. No exchange keys are needed.
@@ -115,7 +116,7 @@ docker compose --env-file .env.production up -d
 docker compose --env-file .env.production ps
 ```
 
-The migration step applies only checked-in SQL. It does not erase historical data. Caddy requests certificates automatically once DNS resolves publicly and ports 80/443 reach the server. Then open `https://<DOMAIN>` and sign in with the configured operator account.
+The migration step applies only checked-in SQL. It does not erase historical data. Caddy requests certificates automatically once DNS resolves publicly and ports 80/443 reach the server. Then open `https://<DOMAIN>`, choose **Sign up**, and create the administrator account using the setup secret.
 
 After first deployment, verify:
 
@@ -125,7 +126,7 @@ docker compose --env-file .env.production logs --tail=100 web market-data paper-
 curl -fsS "https://<DOMAIN>/api/health"
 ```
 
-`/api/health` is intentionally public but only exposes app/database liveness without authentication; collector state and resource metrics require the signed operator session. Administrative data and mutation APIs also require sign-in. Start paper trading explicitly from the Trading page after verifying ingestion, rules and risk settings.
+`/api/health` is intentionally public but only exposes app/database liveness without authentication; collector state and resource metrics require an authenticated session. Administrative data and mutation APIs require an administrator. Start paper trading explicitly from the Trading page after verifying ingestion, rules and risk settings.
 
 ## Updates without data loss
 
@@ -184,10 +185,12 @@ If Binance DNS or networking fails, inspect the collector logs and data freshnes
 
 ## Production security and boundaries
 
-- Operator access uses environment-configured username/password and an 8-hour signed, `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Operator mutations verify same-origin requests. Five failed login attempts per forwarded client address are throttled for 15 minutes per web process.
+- User accounts use email/password, salted scrypt hashes, database-backed revocable sessions and an 8-hour `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Account mutations verify same-origin requests. Five failed sign-in/sign-up attempts per forwarded client address are throttled for 15 minutes per web process.
 - Use HTTPS only, strong unique credentials and restricted SSH. For a single-user terminal, consider placing the site behind a VPN or an additional identity-aware proxy.
-- Authentication currently provides one shared operator identity; it has no MFA, per-user roles or centralized session revocation. A signed session expires after eight hours; logging out clears that browser's cookie.
-- Health and public market-data endpoints are unauthenticated by design. Administrative APIs require sign-in in production.
+- First production administrator setup and admin recovery are protected by a one-time `AUTH_BOOTSTRAP_ADMIN_SECRET`; subsequent public sign-ups are regular users. System-wide mutations and audit access require an administrator. The optional legacy Operator login remains supported.
+- Email verification, MFA and password recovery are not implemented. Do not enable unrestricted public registration on a production deployment until those controls are added.
+- Health liveness and public market-data endpoints are unauthenticated by design. User-facing private APIs require sign-in.
+- User, session, exchange-connection and account-share tables are now modeled. Per-user exchange API management and per-user paper portfolios are not implemented yet; the existing paper portfolio remains shared.
 - Do not enable Binance trading permissions. There is no live execution, leverage, short selling or withdrawal feature.
 - Backups are local to the VPS unless you configure encrypted off-site copies. Host-level resource alerts are not provisioned automatically.
 

@@ -725,7 +725,7 @@ export default function KnowledgeGraph() {
       <PageHeader
         eyebrow="Semantic knowledge graph"
         title="How the world connects"
-        description="Entities and relationships extracted from sources. Verified facts are solid; inferred hypotheses are dashed and never treated as established."
+        description="This is a seeded illustrative graph, not live market, on-chain or news data. Its example edges are marked verified or inferred to demonstrate the interface."
         actions={
           <Segmented
             value={view}

@@ -80,7 +80,7 @@ export function Sidebar() {
       <div className="mt-4 flex flex-col gap-3">
         {!collapsed && (
           <div className="rounded-[10px] border hairline bg-white/[0.025] px-3 py-2.5 text-[11px] leading-relaxed text-fg-3">
-            Interface uses illustrative, simulated data. No live market observations.
+            Market data is live when connected; the Knowledge Graph is illustrative; paper trades are simulated.
           </div>
         )}
         <button

@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -10,12 +12,85 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 const marketTimestamp = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 
 const price = (name: string) => numeric(name, { precision: 30, scale: 12 });
 const quantity = (name: string) => numeric(name, { precision: 36, scale: 18 });
+
+/** User identity for authenticated workspaces. Passwords are scrypt hashes only. */
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role").notNull().default("user"),
+  createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+  updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  check("users_role_check", sql`${table.role} in ('admin', 'user')`),
+  uniqueIndex("users_email_uidx").on(table.email),
+]);
+
+/** Opaque bearer tokens are stored as SHA-256 digests and can be revoked per session. */
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: marketTimestamp("expires_at").notNull(),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("user_sessions_user_id_idx").on(table.userId), index("user_sessions_expires_at_idx").on(table.expiresAt)],
+);
+
+/** Exchange credentials are encrypted by the application before persistence. */
+export const exchangeConnections = pgTable(
+  "exchange_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    exchange: text("exchange").notNull(),
+    label: text("label").notNull(),
+    apiKeyCiphertext: text("api_key_ciphertext").notNull(),
+    apiSecretCiphertext: text("api_secret_ciphertext").notNull(),
+    // The existing nonce/tag pair protects the API key; the second pair protects the secret.
+    encryptionNonce: text("encryption_nonce").notNull(),
+    encryptionTag: text("encryption_tag").notNull(),
+    apiSecretNonce: text("api_secret_nonce").notNull(),
+    apiSecretTag: text("api_secret_tag").notNull(),
+    encryptionVersion: integer("encryption_version").notNull().default(1),
+    permissions: text("permissions").notNull().default("read_only"),
+    status: text("status").notNull().default("pending"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("exchange_connections_read_only_permissions_check", sql`${table.permissions} = 'read_only'`),
+    index("exchange_connections_user_id_idx").on(table.userId),
+    uniqueIndex("exchange_connections_user_exchange_label_uidx").on(table.userId, table.exchange, table.label),
+  ],
+);
+
+/** Explicit grants between users; account data remains private unless shared. */
+export const accountShares = pgTable(
+  "account_shares",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    recipientUserId: uuid("recipient_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
+    status: text("status").notNull().default("pending"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("account_shares_no_self_share", sql`${table.ownerUserId} <> ${table.recipientUserId}`),
+    check("account_shares_status_check", sql`${table.status} in ('pending', 'accepted', 'revoked')`),
+    uniqueIndex("account_shares_owner_recipient_uidx").on(table.ownerUserId, table.recipientUserId),
+    index("account_shares_recipient_user_id_idx").on(table.recipientUserId),
+  ],
+);
 
 /** Key/value operational state: trading mode, emergency shutdown, etc. */
 export const systemState = pgTable("system_state", {

@@ -1,0 +1,3 @@
+ALTER TABLE "account_shares" ADD CONSTRAINT "account_shares_status_check" CHECK ("account_shares"."status" in ('pending', 'accepted', 'revoked'));--> statement-breakpoint
+ALTER TABLE "exchange_connections" ADD CONSTRAINT "exchange_connections_read_only_permissions_check" CHECK ("exchange_connections"."permissions" = 'read_only');--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_role_check" CHECK ("users"."role" in ('admin', 'user'));

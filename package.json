@@ -13,7 +13,7 @@
     "paper-trading:worker": "tsx --tsconfig src/frontend/tsconfig.json src/backend/intelligence/paper-worker.ts",
     "test:market-data": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/market-data/normalize.test.ts src/backend/market-data/binance-spot-provider.test.ts src/frontend/lib/with-database-configuration.test.ts",
     "test:phase2": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/intelligence/indicators.test.ts src/backend/intelligence/risk.test.ts src/backend/intelligence/backtest.test.ts",
-    "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts"
+    "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts src/backend/lib/server/user-auth.test.ts src/backend/lib/server/exchange-credentials.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
