@@ -44,6 +44,117 @@ export type ProposedOrder = {
   quantity: number;
 };
 
+export type Mt5RiskAccount = {
+  accountType: string;
+  equity: number;
+  dayStartEquity: number;
+  peakEquity: number;
+  existingExposure: number;
+  freeMargin: number;
+  usedMargin: number;
+  openPositions: number;
+  pendingOrders: number;
+  tradingAllowed: boolean;
+};
+
+export type Mt5RiskInstrument = {
+  point: number;
+  tickSize: number;
+  tickValue: number;
+  volumeMin: number;
+  volumeMax: number;
+  volumeStep: number;
+  stopsLevelPoints: number;
+};
+
+export type Mt5OrderProposal = {
+  side: "buy" | "sell";
+  price: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  requestedVolume: number | null;
+  spreadPoints: number;
+  notionalPerLot: number;
+  marginPerLot: number | null;
+  maxSpreadPoints: number;
+  emergencyHalt: boolean;
+  demoOrdersEnabled: boolean;
+};
+
+export type Mt5RiskResult = {
+  accepted: boolean;
+  volume: number;
+  estimatedMargin: number;
+  riskReward: number | null;
+  checks: RiskCheck[];
+};
+
+export function validateMt5Order(
+  config: RiskConfig,
+  account: Mt5RiskAccount,
+  instrument: Mt5RiskInstrument,
+  proposal: Mt5OrderProposal,
+): Mt5RiskResult {
+  const { price, stopLoss, takeProfit, side } = proposal;
+  const dailyLossPct = account.dayStartEquity > 0
+    ? Math.max(0, (account.dayStartEquity - account.equity) / account.dayStartEquity * 100)
+    : 100;
+  const drawdownPct = account.peakEquity > 0
+    ? Math.max(0, (account.peakEquity - account.equity) / account.peakEquity * 100)
+    : 100;
+  const stopDistance = stopLoss === null ? 0 : Math.abs(price - stopLoss);
+  const rewardDistance = takeProfit === null ? 0 : Math.abs(takeProfit - price);
+  const validStops = price > 0 && stopLoss !== null && takeProfit !== null &&
+    (side === "buy" ? stopLoss < price && takeProfit > price : takeProfit < price && stopLoss > price) &&
+    stopDistance >= instrument.stopsLevelPoints * instrument.point;
+  const riskReward = validStops && stopDistance > 0 ? rewardDistance / stopDistance : null;
+  const riskPerLot = instrument.tickSize > 0 ? stopDistance / instrument.tickSize * instrument.tickValue : 0;
+  const riskBudget = Math.max(0, account.equity) * config.maxRiskPerTradePct / 100;
+  const riskVolume = riskPerLot > 0 ? riskBudget / riskPerLot : 0;
+  const marginVolume = proposal.marginPerLot === null
+    ? instrument.volumeMax
+    : proposal.marginPerLot > 0 ? Math.max(0, account.freeMargin) / proposal.marginPerLot : 0;
+  const positionVolume = proposal.notionalPerLot > 0
+    ? Math.max(0, account.equity) * config.maxPositionPct / 100 / proposal.notionalPerLot
+    : 0;
+  const exposureVolume = proposal.notionalPerLot > 0
+    ? Math.max(0, account.equity * config.maxExposurePct / 100 - account.existingExposure) / proposal.notionalPerLot
+    : 0;
+  const maxVolume = Math.floor(
+    Math.min(riskVolume, marginVolume, positionVolume, exposureVolume, instrument.volumeMax) / instrument.volumeStep + 1e-10,
+  ) * instrument.volumeStep;
+  const volume = proposal.requestedVolume ?? Number(maxVolume.toPrecision(12));
+  const estimatedMargin = proposal.marginPerLot === null ? 0 : volume * proposal.marginPerLot;
+  const volumeAligned = instrument.volumeStep > 0 &&
+    Math.abs(volume / instrument.volumeStep - Math.round(volume / instrument.volumeStep)) < 1e-8;
+  const checks: RiskCheck[] = [
+    { name: "Demo account", passed: account.accountType === "demo", detail: "MT5 execution is restricted to demo accounts." },
+    { name: "Demo execution enabled", passed: proposal.demoOrdersEnabled, detail: "Demo orders require explicit server-side enablement." },
+    { name: "Trading permission", passed: account.tradingAllowed, detail: "The broker account must permit trading." },
+    { name: "Emergency halt", passed: !proposal.emergencyHalt, detail: proposal.emergencyHalt ? "The global emergency kill switch is active." : "The emergency kill switch is inactive." },
+    { name: "Daily loss limit", passed: dailyLossPct < config.maxDailyLossPct, detail: `Daily loss ${dailyLossPct.toFixed(2)}%; limit ${config.maxDailyLossPct}%.` },
+    { name: "Maximum drawdown", passed: drawdownPct < config.maxDrawdownPct, detail: `Drawdown ${drawdownPct.toFixed(2)}%; limit ${config.maxDrawdownPct}%.` },
+    { name: "Spread", passed: Number.isFinite(proposal.spreadPoints) && proposal.spreadPoints >= 0 && proposal.spreadPoints <= proposal.maxSpreadPoints, detail: `Spread ${proposal.spreadPoints} points; limit ${proposal.maxSpreadPoints}.` },
+    { name: "Protective stops", passed: validStops, detail: "A valid stop-loss and take-profit are required and must respect broker stop distance." },
+    { name: "Minimum risk/reward", passed: riskReward !== null && riskReward + 1e-10 >= config.minRiskReward, detail: `Required ratio ${config.minRiskReward}:1; proposed ${riskReward?.toFixed(2) ?? "unavailable"}.` },
+    { name: "Position concurrency", passed: account.openPositions + account.pendingOrders < config.maxConcurrentPositions, detail: `Open positions and pending orders count toward the ${config.maxConcurrentPositions} position limit.` },
+    { name: "Broker margin estimate", passed: proposal.marginPerLot === null || (Number.isFinite(proposal.marginPerLot) && proposal.marginPerLot > 0), detail: proposal.marginPerLot === null ? "Broker margin will be checked during bridge preflight." : "The bridge must provide a positive MT5 order_calc_margin estimate." },
+    { name: "Exposure estimate", passed: Number.isFinite(proposal.notionalPerLot) && proposal.notionalPerLot > 0 && Number.isFinite(account.existingExposure), detail: "Notional exposure is calculated in the account currency using the broker tick value." },
+    { name: "Volume limits", passed: volume >= instrument.volumeMin && volume <= instrument.volumeMax && volumeAligned, detail: `Volume must align to broker range ${instrument.volumeMin}–${instrument.volumeMax} by ${instrument.volumeStep}.` },
+    { name: "Risk and margin budget", passed: maxVolume >= instrument.volumeMin && volume <= maxVolume, detail: `Maximum permitted volume is ${Number(maxVolume.toPrecision(12))} lots.` },
+    { name: "Position notional", passed: proposal.notionalPerLot > 0 && volume * proposal.notionalPerLot <= Math.max(0, account.equity) * config.maxPositionPct / 100 + 1e-8, detail: `Position notional must not exceed ${config.maxPositionPct}% of equity.` },
+    { name: "Aggregate exposure", passed: proposal.notionalPerLot > 0 && account.existingExposure + volume * proposal.notionalPerLot <= Math.max(0, account.equity) * config.maxExposurePct / 100 + 1e-8, detail: `Account exposure must not exceed ${config.maxExposurePct}% of equity.` },
+    { name: "Free margin", passed: proposal.marginPerLot === null || estimatedMargin <= account.freeMargin, detail: proposal.marginPerLot === null ? "Free margin will be checked against the broker estimate during preflight." : `Estimated margin ${estimatedMargin.toFixed(2)}; free margin ${account.freeMargin.toFixed(2)}.` },
+  ];
+  return {
+    accepted: checks.every((check) => check.passed),
+    volume: Number(volume.toPrecision(12)),
+    estimatedMargin: Number(estimatedMargin.toPrecision(12)),
+    riskReward,
+    checks,
+  };
+}
+
 export function validatePaperOrder(
   config: RiskConfig,
   account: RiskAccountState,

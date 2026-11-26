@@ -1,8 +1,11 @@
 "use client";
 
+import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Badge } from "@/components/glass";
 import { useUI } from "@/stores/ui";
 import { readAuthResponse, type AuthApiResponse } from "@/lib/auth-response";
+import { MobileNav } from "./Sidebar";
 
 type SessionState = "checking" | "authenticated" | "signed-out";
 type AuthMode = "login" | "signup" | "operator";
@@ -86,6 +89,8 @@ export function OperatorGate({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    setBusy(true);
+    setError("");
     try {
       const response = await fetch("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("Sign-out failed");
@@ -94,6 +99,8 @@ export function OperatorGate({ children }: { children: ReactNode }) {
       setMode("login");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -157,9 +164,45 @@ export function OperatorGate({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div className="flex justify-end gap-3 border-b hairline px-4 py-1.5 lg:px-8">
-        <span className="text-[11px] text-fg-4">{user?.email} · {user?.role}</span>
-        <button onClick={() => void signOut()} className="text-[11px] text-fg-3 hover:text-fg-2">Sign out</button>
+      <div className="mx-auto flex w-full max-w-[1520px] justify-end pb-3">
+        <details className="group relative z-40">
+          <summary
+            aria-label="Account menu"
+            className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-xl border hairline bg-white/[0.035] py-1.5 pl-1.5 pr-2.5 text-left transition-colors hover:border-white/15 hover:bg-white/[0.06] [&::-webkit-details-marker]:hidden"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
+              <UserRound size={15} strokeWidth={1.7} />
+            </span>
+            <span className="min-w-0 max-w-[min(180px,45vw)] sm:max-w-[220px]">
+              <span className="block truncate text-[11px] font-medium text-fg">{user?.email ?? "Signed in"}</span>
+              <span className="mt-0.5 block text-[9px] uppercase tracking-[0.14em] text-fg-4">
+                {user?.role === "admin" ? "Administrator" : user?.role ?? "Account"}
+              </span>
+            </span>
+            <ChevronDown size={14} className="shrink-0 text-fg-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="absolute right-0 top-full mt-2 w-[min(280px,calc(100vw-2rem))] overflow-hidden rounded-xl border hairline bg-[#0b0e14]/95 shadow-2xl backdrop-blur-xl">
+            <div className="px-4 py-3">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-fg-4">Signed in to Axylum</div>
+              <div className="mt-1 break-all text-[12px] text-fg">{user?.email ?? "Account"}</div>
+              <Badge tone={user?.role === "admin" ? "blue" : "amber"} className="mt-2">
+                {(user?.role ?? "user").toUpperCase()}
+              </Badge>
+            </div>
+            {error && <p role="alert" className="mx-3 mb-2 rounded-lg border border-down/20 bg-down/5 px-2.5 py-2 text-[11px] text-down">{error}</p>}
+            <div className="border-t hairline p-1.5">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void signOut()}
+                className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-fg disabled:cursor-wait disabled:opacity-60"
+              >
+                <LogOut size={14} />
+                <span>{busy ? "Signing out…" : "Sign out"}</span>
+              </button>
+            </div>
+          </div>
+        </details>
       </div>
       {user?.role !== "admin" && (
         <div className="border-b hairline bg-white/[0.02] px-4 py-2 text-center text-[11px] text-fg-3">
@@ -167,6 +210,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
         </div>
       )}
       {children}
+      <MobileNav />
     </>
   );
 }

@@ -50,6 +50,22 @@ npm run test:auth
 npm run build
 ```
 
+## Responsive app, installable PWA and offline behavior
+
+The Next.js app includes a mobile bottom navigation, touch-sized controls, responsive trading/watchlist layouts, touch pointer inspection for charts, a web app manifest, branded icons, and a service worker. The service worker is registered on production builds, not the development server. Serve the deployed app over HTTPS; `localhost` is also treated as a secure origin for local testing.
+
+Install the app:
+
+- **Windows/macOS/Linux, Chrome or Edge:** open Axylum and use the install icon in the address bar or the browser menu’s **Install app** action.
+- **iPhone/iPad:** open Axylum in Safari, use **Share → Add to Home Screen**, then launch it from the Home Screen.
+- **Android:** open Axylum in Chrome and choose **Install app** or **Add to Home screen** from the browser menu.
+
+Offline behavior is intentionally limited. The service worker may cache versioned Next.js static assets and app icons, and serves a generic offline page when navigation cannot reach the server. It does not cache `/api` responses, Next.js data requests, authenticated HTML, private account information, market responses, or order/trading actions. Account, market and trading functionality requires a network connection; the offline page does not imply offline trading support.
+
+In **Settings → Alert delivery**, a user can grant browser notification permission and send a local test notification. The service worker can display a valid Web Push event, but Axylum does not yet include VAPID key configuration, authenticated push-subscription storage, subscription lifecycle APIs, or event publishers. Consequently, order fills, protection events, disconnections, market alerts, strategy signals and risk violations are not yet sent as background notifications. Do not treat permission or the local test as proof of server-side alert delivery. iOS/iPadOS Web Push requires a supported OS version and a Home Screen-installed web app.
+
+For responsive checks, use browser device emulation at representative widths such as 320, 375, 768 and 1280 CSS pixels; verify navigation, chart inspection, scrolling, forms and trading panels. Also test real Safari/iPhone/iPad and Android Chrome before release: desktop emulation does not validate operating-system install prompts, safe areas, notification permissions, or touch behavior on physical hardware.
+
 ## Hosted production architecture
 
 `compose.yaml` defines separate restartable containers:
@@ -82,6 +98,79 @@ Vercel can host the Next.js web app and API routes, and Neon can host PostgreSQL
 5. Deploy from the linked GitHub branch. Open the Vercel URL, choose **Sign up**, create the first account with the one-time setup code, and verify you can sign out and sign back in. Remove `AUTH_BOOTSTRAP_ADMIN_SECRET` from Vercel once the administrator account is created.
 
 Only the pooled URL and bootstrap secret are required by the Vercel web runtime. `DATABASE_URL_UNPOOLED` is for trusted migrations and long-lived worker advisory locks, not a browser variable. Do not configure the local Docker Compose database URL (`@db:5432`) in Vercel.
+
+## MetaTrader 5 bridge and demo execution
+
+MetaTrader 5 requires its Windows desktop terminal and the official Windows-only Python package. Do not attempt to load the terminal or `MetaTrader5` package in Next.js, Vercel functions, or the Linux Compose services. The intended deployment is a separate Python bridge running on the same Windows machine/VPS as the terminal. It makes outbound HTTPS requests to Axylum; no inbound MT5 port is required.
+
+The integration provides owner-scoped account and market data, signed bridge APIs, and a trading page with account status, broker-mapped quotes, positions, pending orders, execution requests, and broker deals. The bridge reports account, instrument, tick, and candle snapshots, and supports demo-only order commands:
+
+- `POST /api/mt5/bridge/heartbeat`
+- `POST /api/mt5/bridge/snapshot`
+- `POST /api/mt5/bridge/market-data`
+- `POST /api/mt5/bridge/orders/commands`
+- `POST /api/mt5/bridge/orders/preflight`
+- `POST /api/mt5/bridge/orders/result`
+- `GET /api/mt5/accounts` (authenticated, owner-scoped, with broker login masked)
+- `GET` and `POST /api/mt5/orders` (authenticated and owner-scoped)
+
+The bridge token is generated out-of-band by `npm run mt5:bridge:provision -- <admin-email> <bridge-name>`. The command prints the token once and stores only its SHA-256 digest in PostgreSQL. Keep the token in a trusted Windows service environment, never in browser code, source control, or chat. Revoke a token with `npm run mt5:bridge:revoke -- <bridge-id>`. MT5 login passwords are not stored by Axylum; the bridge attaches to a terminal already logged into its broker account.
+
+The MT5 schema migrations are additive and leave Binance tables unchanged. Review [migration 0008](../src/backend/db/migrations/0008_harsh_absorbing_man.sql) and [migration 0009](../src/backend/db/migrations/0009_glossy_plazm.sql), back up the database, and apply both using a trusted direct connection before provisioning a bridge. Neither migration is applied automatically; do not run them against production without explicit authorization, review, and backup:
+
+```sh
+npm run db:migrate
+```
+
+### Run the Windows bridge
+
+1. Deploy the Axylum web app/API containing the MT5 routes and apply the reviewed migrations. Keep `AXYLUM_MT5_DEMO_TRADING_ENABLED` unset or set to `false` until a demo terminal has been verified. Provision a bridge against the intended database with an administrator account:
+
+   ```powershell
+   npm run mt5:bridge:provision -- admin@example.com "Windows demo terminal"
+   ```
+
+   Run provisioning from a trusted environment with `DATABASE_URL_UNPOOLED` set to the direct Neon URL (or a trusted direct PostgreSQL connection). Save the printed `bridgeId` and one-time `token` directly into the Windows service's protected environment. The token cannot be retrieved later.
+
+2. On the Windows host, install 64-bit Python 3.11+, install MetaTrader 5, and sign in to a **demo** account in the desktop terminal. The bridge does not accept or transmit the broker password.
+
+3. From the repository root, create a Python environment and install the bridge dependency:
+
+   ```powershell
+   py -3.11 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r services\mt5-bridge\requirements.txt
+   ```
+
+4. Configure the bridge process environment using the bridge ID and token from provisioning:
+
+   ```powershell
+   $env:AXYLUM_API_BASE_URL = "https://<your-axylum-domain>"
+   $env:AXYLUM_BRIDGE_ID = "<provisioned-bridge-uuid>"
+   $env:AXYLUM_BRIDGE_TOKEN = "<one-time-bridge-token>"
+   $env:MT5_SYMBOLS = "EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD,US30,NAS100"
+   $env:MT5_SERVER_UTC_OFFSET_SECONDS = "0"
+   # Optional: map canonical symbols to the exact names shown by this broker.
+   $env:MT5_SYMBOL_MAP = '{"US30":"US30.cash","NAS100":"USTEC"}'
+   .\.venv\Scripts\python.exe services\mt5-bridge\bridge.py
+   ```
+
+   `MT5_SERVER_UTC_OFFSET_SECONDS` is the broker server's verified offset from UTC; the bridge subtracts it from terminal timestamps before sending market data and order history. Keep `0` only when terminal timestamps are already UTC. This staging MetaQuotes-Demo terminal reports timestamps two hours ahead of UTC, so its staging bridge uses `7200`; do not copy that value for another broker or terminal without checking. The example mappings are placeholders; configure only names confirmed in the broker's terminal. Unmapped or ambiguous instruments are skipped with a warning. The bridge sends account snapshots every 30 seconds, heartbeats every 15 seconds, and changed ticks/candles on its polling interval. Initial history backfill is configurable with `MT5_HISTORY_BARS` (100–5000, default 500). For local development only, `AXYLUM_API_BASE_URL` may use `http://127.0.0.1:5174` or `http://localhost:5174`; non-local endpoints require HTTPS.
+
+5. Run the bridge under the same Windows user/session as the terminal. For ongoing use, configure a Windows service/process supervisor and protect its environment variables. Revoke a bridge token if the host is decommissioned or the token is exposed.
+
+The bridge ingests account metrics, instrument specifications, positions, pending orders, recent deals, ticks, and historical/updated candles for M1, M5, M15, M30, H1, H4, D1, and W1. It reconnects after errors and retries data ingestion idempotently.
+
+Demo order requests are disabled by default. To test them, set `AXYLUM_MT5_DEMO_TRADING_ENABLED=true` only on the server after confirming the connected terminal is a demo account. `AXYLUM_MT5_MAX_SPREAD_POINTS` defaults to `30`. Each new order requires server-side risk validation, current bridge margin preflight, and a live broker quote; the bridge then validates the demo login/server, symbol rules, spread, margin, and MT5 `order_check` before sending. The backend records an intent ID before the bridge can send it. A submitted request is not automatically replayed after a timeout; it is reconciled with broker history and may remain `unknown`. A `202` response means the request was queued, not that the broker filled it. Confirm the final state in the execution requests and broker-deals panels.
+
+The UI also supports demo position closure, stop modification, and pending-order cancellation. Live-account execution is rejected in both backend and bridge code. Credentials remain in the local MT5 terminal and are never sent to the browser or Axylum.
+
+The existing Binance paper-trading UI and engine are unchanged. MT5 signals are not yet produced by a multi-market strategy engine, cross-currency balances are not consolidated, and strategy compatibility across crypto and FX is not implemented. Do not treat this as a completed or production-verified broker integration: Python mock tests require Python 3.11+, while real bridge operation requires Windows and the MT5 terminal. Live account synchronization, database persistence, and demo execution must be verified against an authenticated MT5 demo terminal before use.
+
+Run bridge unit tests on a host with Python installed:
+
+```powershell
+py -3.11 -m unittest discover -s services\mt5-bridge -p test_*.py
+```
 
 ## First VPS deployment
 

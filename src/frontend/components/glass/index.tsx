@@ -41,12 +41,12 @@ export function PanelHeader({
   className?: string;
 }) {
   return (
-    <header className={cn("flex items-center justify-between gap-3 px-5 pt-4 pb-3", className)}>
+    <header className={cn("flex min-w-0 flex-col items-start justify-between gap-2 px-4 pt-4 pb-3 sm:flex-row sm:items-center sm:px-5", className)}>
       <div className="min-w-0">
         {eyebrow && <div className="eyebrow">{eyebrow}</div>}
         {title && <h3 className="mt-0.5 truncate text-[14px] font-medium text-fg">{title}</h3>}
       </div>
-      {action}
+      {action && <div className="w-full max-w-full shrink-0 sm:w-auto">{action}</div>}
     </header>
   );
 }
@@ -76,13 +76,13 @@ export function StatusDot({ status, pulse }: { status: "ok" | "degraded" | "down
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description?: string; actions?: ReactNode }) {
   return (
-    <div className="anim-rise flex flex-wrap items-end justify-between gap-4 pb-6">
+    <div className="anim-rise flex flex-wrap items-start justify-between gap-4 pb-6 sm:items-end">
       <div>
         <div className="eyebrow">{eyebrow}</div>
-        <h1 className="mt-1.5 text-[26px] font-semibold tracking-tight text-fg">{title}</h1>
+        <h1 className="mt-1.5 break-words text-[clamp(1.25rem,5vw,1.625rem)] font-semibold tracking-tight text-fg">{title}</h1>
         {description && <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-fg-2">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex w-full max-w-full flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
     </div>
   );
 }
@@ -125,7 +125,7 @@ export function Tabs<T extends string>({
   id: string;
 }) {
   return (
-    <div role="tablist" className="flex gap-1 border-b hairline">
+    <div role="tablist" className="flex max-w-full gap-1 overflow-x-auto border-b hairline">
       {tabs.map((t) => (
         <button
           key={t.key}
@@ -133,7 +133,7 @@ export function Tabs<T extends string>({
           aria-selected={value === t.key}
           onClick={() => onChange(t.key)}
           className={cn(
-            "relative px-3.5 pb-3 pt-1 text-[13px] font-medium transition-colors",
+            "relative min-h-11 shrink-0 px-3.5 py-2 text-[13px] font-medium transition-colors",
             value === t.key ? "text-fg" : "text-fg-3 hover:text-fg-2",
           )}
         >
@@ -159,13 +159,13 @@ export function Segmented<T extends string>({
   size?: "sm" | "md";
 }) {
   return (
-    <div className="inline-flex rounded-lg border hairline bg-black/25 p-0.5">
+    <div className="inline-flex max-w-full overflow-x-auto rounded-lg border hairline bg-black/25 p-0.5">
       {options.map((o) => (
         <button
           key={o.key}
           onClick={() => onChange(o.key)}
           className={cn(
-            "rounded-md font-medium transition-colors",
+            "min-h-9 shrink-0 rounded-md font-medium transition-colors",
             size === "sm" ? "px-2.5 py-1 text-[11.5px]" : "px-3 py-1.5 text-[12.5px]",
             value === o.key ? "bg-white/[0.09] text-fg shadow-sm" : "text-fg-3 hover:text-fg-2",
           )}
@@ -203,7 +203,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-[12.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-[12.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         styles,
         className,
       )}
@@ -224,7 +224,7 @@ export function Bar({ value, tone = "blue", className }: { value: number; tone?:
 
 export function Row({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className={cn("flex items-center justify-between gap-4 py-2 text-[13px]", className)}>
+    <div className={cn("flex flex-wrap items-center justify-between gap-2 py-2 text-[13px] sm:flex-nowrap sm:gap-4", className)}>
       <span className="text-fg-3">{label}</span>
       <span className="text-fg">{children}</span>
     </div>

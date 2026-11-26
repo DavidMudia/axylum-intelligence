@@ -358,7 +358,11 @@ async function cycle(): Promise<void> {
 }
 
 async function main() {
-  releaseWorkerLock = await acquireWorkerLock(pool, 83_710_423, "paper-trading");
+  releaseWorkerLock = await acquireWorkerLock(pool, 83_710_423, "paper-trading", (error) => {
+    console.error(`[paper-trading] worker lock connection failed: ${error.message}`);
+    process.exitCode = 1;
+    process.kill(process.pid, "SIGTERM");
+  });
   await ensureTradingDefaults();
   const intervalMs = Number(process.env.PAPER_TRADING_POLL_MS ?? 5_000);
   if (!Number.isInteger(intervalMs) || intervalMs < 1_000 || intervalMs > 60_000) {

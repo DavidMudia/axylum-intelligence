@@ -73,6 +73,260 @@ export const exchangeConnections = pgTable(
   ],
 );
 
+/** A Windows MT5 bridge is provisioned out-of-band; only its token digest is stored. */
+export const mt5Bridges = pgTable(
+  "mt5_bridges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    status: text("status").notNull().default("offline"),
+    terminalVersion: text("terminal_version"),
+    lastHeartbeatAt: marketTimestamp("last_heartbeat_at"),
+    lastError: text("last_error"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("mt5_bridges_status_check", sql`${table.status} in ('online', 'offline', 'degraded')`),
+    uniqueIndex("mt5_bridges_token_hash_uidx").on(table.tokenHash),
+    uniqueIndex("mt5_bridges_owner_name_uidx").on(table.ownerUserId, table.name),
+    index("mt5_bridges_owner_status_idx").on(table.ownerUserId, table.status),
+  ],
+);
+
+/** Broker login identifiers are private backend data and are never returned by account APIs. */
+export const mt5Accounts = pgTable(
+  "mt5_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    bridgeId: uuid("bridge_id").notNull().references(() => mt5Bridges.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    login: text("login").notNull(),
+    server: text("server").notNull(),
+    broker: text("broker").notNull().default(""),
+    accountType: text("account_type").notNull().default("unknown"),
+    currency: text("currency").notNull().default(""),
+    leverage: integer("leverage").notNull().default(0),
+    balance: numeric("balance", { precision: 30, scale: 12 }).notNull().default("0"),
+    equity: numeric("equity", { precision: 30, scale: 12 }).notNull().default("0"),
+    freeMargin: numeric("free_margin", { precision: 30, scale: 12 }).notNull().default("0"),
+    usedMargin: numeric("used_margin", { precision: 30, scale: 12 }).notNull().default("0"),
+    marginLevel: numeric("margin_level", { precision: 30, scale: 12 }),
+    floatingProfit: numeric("floating_profit", { precision: 30, scale: 12 }).notNull().default("0"),
+    dayStartEquity: numeric("day_start_equity", { precision: 30, scale: 12 }).notNull().default("0"),
+    dayStartDate: text("day_start_date").notNull().default(""),
+    peakEquity: numeric("peak_equity", { precision: 30, scale: 12 }).notNull().default("0"),
+    tradingAllowed: boolean("trading_allowed").notNull().default(false),
+    expertAllowed: boolean("expert_allowed").notNull().default(false),
+    connected: boolean("connected").notNull().default(false),
+    lastSyncAt: marketTimestamp("last_sync_at"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("mt5_accounts_type_check", sql`${table.accountType} in ('demo', 'live', 'contest', 'unknown')`),
+    uniqueIndex("mt5_accounts_bridge_server_login_uidx").on(table.bridgeId, table.server, table.login),
+    index("mt5_accounts_owner_updated_idx").on(table.ownerUserId, table.updatedAt),
+  ],
+);
+
+/** One broker symbol mapping per connected account; broker symbols are not globally stable. */
+export const mt5Instruments = pgTable(
+  "mt5_instruments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id").notNull().references(() => mt5Accounts.id, { onDelete: "cascade" }),
+    brokerSymbol: text("broker_symbol").notNull(),
+    canonicalSymbol: text("canonical_symbol").notNull(),
+    assetClass: text("asset_class").notNull().default("other"),
+    description: text("description").notNull().default(""),
+    baseCurrency: text("base_currency"),
+    quoteCurrency: text("quote_currency"),
+    digits: integer("digits").notNull(),
+    point: numeric("point", { precision: 30, scale: 18 }).notNull(),
+    tickSize: numeric("tick_size", { precision: 30, scale: 18 }).notNull(),
+    tickValue: numeric("tick_value", { precision: 30, scale: 12 }).notNull(),
+    contractSize: numeric("contract_size", { precision: 30, scale: 12 }).notNull(),
+    volumeMin: numeric("volume_min", { precision: 30, scale: 12 }).notNull(),
+    volumeMax: numeric("volume_max", { precision: 30, scale: 12 }).notNull(),
+    volumeStep: numeric("volume_step", { precision: 30, scale: 12 }).notNull(),
+    stopsLevelPoints: integer("stops_level_points").notNull().default(0),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedAt: marketTimestamp("updated_at").notNull(),
+  },
+  (table) => [
+    check("mt5_instruments_asset_class_check", sql`${table.assetClass} in ('forex', 'metal', 'index', 'commodity', 'crypto', 'other')`),
+    uniqueIndex("mt5_instruments_account_symbol_uidx").on(table.accountId, table.brokerSymbol),
+    index("mt5_instruments_canonical_symbol_idx").on(table.canonicalSymbol),
+  ],
+);
+
+/** Tick prices retain the source instrument and broker timestamp for reconciliation. */
+export const mt5MarketTicks = pgTable(
+  "mt5_market_ticks",
+  {
+    id: serial("id").primaryKey(),
+    instrumentId: uuid("instrument_id").notNull().references(() => mt5Instruments.id, { onDelete: "cascade" }),
+    sourceTickId: text("source_tick_id").notNull(),
+    tickTime: marketTimestamp("tick_time").notNull(),
+    bid: numeric("bid", { precision: 30, scale: 12 }).notNull(),
+    ask: numeric("ask", { precision: 30, scale: 12 }).notNull(),
+    last: numeric("last", { precision: 30, scale: 12 }),
+    volume: quantity("volume"),
+    receivedAt: marketTimestamp("received_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("mt5_market_ticks_instrument_source_uidx").on(table.instrumentId, table.sourceTickId),
+    index("mt5_market_ticks_instrument_time_idx").on(table.instrumentId, table.tickTime),
+  ],
+);
+
+/** MT5 candles use MT5 timeframe labels and cannot collide with Binance candle keys. */
+export const mt5MarketCandles = pgTable(
+  "mt5_market_candles",
+  {
+    id: serial("id").primaryKey(),
+    instrumentId: uuid("instrument_id").notNull().references(() => mt5Instruments.id, { onDelete: "cascade" }),
+    timeframe: text("timeframe").notNull(),
+    openTime: marketTimestamp("open_time").notNull(),
+    closeTime: marketTimestamp("close_time").notNull(),
+    open: price("open").notNull(),
+    high: price("high").notNull(),
+    low: price("low").notNull(),
+    close: price("close").notNull(),
+    tickVolume: quantity("tick_volume").notNull(),
+    realVolume: quantity("real_volume").notNull(),
+    spreadPoints: integer("spread_points").notNull().default(0),
+    isClosed: boolean("is_closed").notNull(),
+    receivedAt: marketTimestamp("received_at").notNull(),
+  },
+  (table) => [
+    check("mt5_market_candles_timeframe_check", sql`${table.timeframe} in ('M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1')`),
+    uniqueIndex("mt5_market_candles_instrument_tf_open_uidx").on(table.instrumentId, table.timeframe, table.openTime),
+    index("mt5_market_candles_instrument_tf_close_idx").on(table.instrumentId, table.timeframe, table.closeTime),
+  ],
+);
+
+/** Demo-only order intents are idempotent and transition before bridge execution. */
+export const mt5OrderIntents = pgTable(
+  "mt5_order_intents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id").notNull().references(() => mt5Accounts.id, { onDelete: "cascade" }),
+    bridgeId: uuid("bridge_id").notNull().references(() => mt5Bridges.id, { onDelete: "cascade" }),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    clientOrderId: text("client_order_id").notNull(),
+    operation: text("operation").notNull(),
+    status: text("status").notNull(),
+    brokerSymbol: text("broker_symbol"),
+    side: text("side"),
+    orderType: text("order_type"),
+    requestedVolume: quantity("requested_volume"),
+    filledVolume: quantity("filled_volume").notNull().default("0"),
+    price: price("price"),
+    stopLoss: price("stop_loss"),
+    takeProfit: price("take_profit"),
+    estimatedMargin: numeric("estimated_margin", { precision: 30, scale: 12 }),
+    riskChecks: jsonb("risk_checks").$type<Array<{ name: string; passed: boolean; detail: string }>>().notNull().default([]),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    brokerResult: jsonb("broker_result").$type<Record<string, unknown> | null>(),
+    error: text("error"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+    submittedAt: marketTimestamp("submitted_at"),
+    completedAt: marketTimestamp("completed_at"),
+  },
+  (table) => [
+    check("mt5_order_intents_operation_check", sql`${table.operation} in ('place_order', 'modify_position', 'close_position', 'cancel_pending')`),
+    check("mt5_order_intents_status_check", sql`${table.status} in ('preflight', 'validated', 'submitted', 'accepted', 'partially_filled', 'filled', 'rejected', 'unknown', 'cancelled', 'closed')`),
+    check("mt5_order_intents_side_check", sql`${table.side} is null or ${table.side} in ('buy', 'sell')`),
+    uniqueIndex("mt5_order_intents_account_client_uidx").on(table.accountId, table.clientOrderId),
+    index("mt5_order_intents_bridge_status_created_idx").on(table.bridgeId, table.status, table.createdAt),
+    index("mt5_order_intents_owner_created_idx").on(table.ownerUserId, table.createdAt),
+  ],
+);
+
+/** Broker positions are periodically reconciled from the terminal, not inferred from requests. */
+export const mt5Positions = pgTable(
+  "mt5_positions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id").notNull().references(() => mt5Accounts.id, { onDelete: "cascade" }),
+    brokerTicket: text("broker_ticket").notNull(),
+    brokerSymbol: text("broker_symbol").notNull(),
+    side: text("side").notNull(),
+    volume: quantity("volume").notNull(),
+    openPrice: price("open_price").notNull(),
+    currentPrice: price("current_price").notNull(),
+    stopLoss: price("stop_loss"),
+    takeProfit: price("take_profit"),
+    profit: numeric("profit", { precision: 30, scale: 12 }).notNull().default("0"),
+    swap: numeric("swap", { precision: 30, scale: 12 }).notNull().default("0"),
+    openedAt: marketTimestamp("opened_at").notNull(),
+    updatedAt: marketTimestamp("updated_at").notNull(),
+    closedAt: marketTimestamp("closed_at"),
+  },
+  (table) => [
+    check("mt5_positions_side_check", sql`${table.side} in ('buy', 'sell')`),
+    uniqueIndex("mt5_positions_account_ticket_uidx").on(table.accountId, table.brokerTicket),
+    index("mt5_positions_account_open_idx").on(table.accountId, table.closedAt),
+  ],
+);
+
+/** Current broker pending orders; terminal reconciliation marks removed tickets inactive. */
+export const mt5PendingOrders = pgTable(
+  "mt5_pending_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id").notNull().references(() => mt5Accounts.id, { onDelete: "cascade" }),
+    brokerTicket: text("broker_ticket").notNull(),
+    brokerSymbol: text("broker_symbol").notNull(),
+    orderType: text("order_type").notNull(),
+    side: text("side").notNull(),
+    volume: quantity("volume").notNull(),
+    price: price("price").notNull(),
+    stopLoss: price("stop_loss"),
+    takeProfit: price("take_profit"),
+    createdAt: marketTimestamp("created_at").notNull(),
+    updatedAt: marketTimestamp("updated_at").notNull(),
+    active: boolean("active").notNull().default(true),
+  },
+  (table) => [
+    check("mt5_pending_orders_side_check", sql`${table.side} in ('buy', 'sell')`),
+    uniqueIndex("mt5_pending_orders_account_ticket_uidx").on(table.accountId, table.brokerTicket),
+    index("mt5_pending_orders_account_active_idx").on(table.accountId, table.active),
+  ],
+);
+
+/** Deal history is keyed by the broker ticket for safe repeated synchronization. */
+export const mt5Deals = pgTable(
+  "mt5_deals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id").notNull().references(() => mt5Accounts.id, { onDelete: "cascade" }),
+    brokerTicket: text("broker_ticket").notNull(),
+    orderTicket: text("order_ticket"),
+    positionTicket: text("position_ticket"),
+    brokerSymbol: text("broker_symbol").notNull(),
+    side: text("side").notNull(),
+    entry: text("entry").notNull(),
+    volume: quantity("volume").notNull(),
+    price: price("price").notNull(),
+    profit: numeric("profit", { precision: 30, scale: 12 }).notNull().default("0"),
+    commission: numeric("commission", { precision: 30, scale: 12 }).notNull().default("0"),
+    swap: numeric("swap", { precision: 30, scale: 12 }).notNull().default("0"),
+    comment: text("comment").notNull().default(""),
+    occurredAt: marketTimestamp("occurred_at").notNull(),
+    receivedAt: marketTimestamp("received_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("mt5_deals_account_ticket_uidx").on(table.accountId, table.brokerTicket),
+    index("mt5_deals_account_time_idx").on(table.accountId, table.occurredAt),
+  ],
+);
+
 /** Explicit grants between users; account data remains private unless shared. */
 export const accountShares = pgTable(
   "account_shares",

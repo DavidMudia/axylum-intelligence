@@ -9,12 +9,13 @@ import { CommandPalette } from "./CommandPalette";
 import { Logo, NavList, Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { OperatorGate } from "./OperatorGate";
+import { PwaRuntime } from "./PwaRuntime";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { streamOpen, streamDrawer, setStreamDrawer, mobileNav, setMobileNav, system } = useUI();
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="app-viewport flex overflow-hidden">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
@@ -25,7 +26,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
         <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-y-auto px-4 pb-12 pt-7 lg:px-8">
+          <main className="app-main min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-5 lg:px-8 lg:pt-7">
             <OperatorGate>
               <div className="mx-auto max-w-[1520px]">{children}</div>
             </OperatorGate>
@@ -39,6 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <CommandPalette />
+      <PwaRuntime />
 
       <AnimatePresence>
         {mobileNav && (

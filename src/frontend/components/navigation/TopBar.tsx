@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, PanelRight, Search } from "lucide-react";
+import { Menu, PanelRight, Search, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/glass";
@@ -44,14 +44,14 @@ export function TopBar() {
   };
 
   return (
-    <header className="relative z-30 flex h-[60px] shrink-0 items-center gap-4 border-b hairline bg-black/20 px-4 backdrop-blur-xl lg:px-8">
-      <button onClick={() => setMobileNav(true)} className="rounded-md p-2 text-fg-2 hover:bg-white/5 lg:hidden" aria-label="Open navigation">
+    <header className="relative z-30 flex h-[60px] shrink-0 items-center gap-2 border-b hairline bg-black/20 px-3 backdrop-blur-xl sm:gap-4 sm:px-4 lg:px-8">
+      <button onClick={() => setMobileNav(true)} className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-white/5 lg:hidden" aria-label="Open navigation">
         <Menu size={18} />
       </button>
 
       <button
         onClick={() => setPalette(true)}
-        className="group flex h-9 w-full max-w-[420px] items-center gap-3 rounded-[10px] border hairline bg-white/[0.03] px-3 text-left text-[13px] text-fg-3 transition-colors hover:border-white/15 hover:bg-white/[0.05]"
+        className="group flex h-11 min-w-0 w-full max-w-[420px] flex-1 items-center gap-2 rounded-[10px] border hairline bg-white/[0.03] px-2.5 text-left text-[13px] text-fg-3 transition-colors hover:border-white/15 hover:bg-white/[0.05] sm:gap-3 sm:px-3"
       >
         <Search size={14} />
         <span className="flex-1 truncate">Search assets, sources, models…</span>
@@ -85,9 +85,9 @@ export function TopBar() {
       <Link
         href="/settings"
         aria-label="User settings"
-        className="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-gradient-to-br from-accent/30 to-violet/30 text-[11px] font-semibold text-fg"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border hairline bg-white/[0.03] text-fg-2 transition-colors hover:bg-white/[0.07] hover:text-fg"
       >
-        OP
+        <Settings2 size={16} strokeWidth={1.7} />
       </Link>
     </header>
   );

@@ -37,18 +37,18 @@ export function MarketChart({
 
   return (
     <Panel className={cn("flex flex-col", className)} hover={false}>
-      <div className="flex flex-wrap items-center justify-between gap-4 px-5 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-5">
         <div className="flex items-end gap-4">
           <div>
             <div className="eyebrow">{asset.name} · 1H</div>
-            <div className="mt-1 flex items-baseline gap-3">
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="text-[15px] font-medium text-fg">{asset.symbol}</span>
-              <AnimatedNumber value={last?.c ?? asset.price} format={(v) => fmtPrice(v)} className="text-[24px] font-medium text-fg" />
+              <AnimatedNumber value={last?.c ?? asset.price} format={(v) => fmtPrice(v)} className="text-[clamp(1.15rem,5vw,1.5rem)] font-medium text-fg" />
               <Delta value={change} className="text-[13px]" />
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           {actions}
           <Segmented
             size="sm"
@@ -63,14 +63,14 @@ export function MarketChart({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 px-5 pt-3.5">
+      <div className="flex flex-wrap gap-1.5 px-4 pt-3.5 sm:px-5">
         {CHIPS.map((c) => (
           <button
             key={c.key}
             onClick={() => setInd((s) => ({ ...s, [c.key]: !s[c.key] }))}
             aria-pressed={ind[c.key]}
             className={cn(
-              "rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+              "min-h-9 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
               ind[c.key] ? "border-accent/35 bg-accent/10 text-[#9db8f5]" : "border-white/8 text-fg-3 hover:text-fg-2",
             )}
           >

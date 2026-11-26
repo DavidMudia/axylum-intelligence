@@ -79,9 +79,9 @@ function Features() {
       <PanelHeader eyebrow="Feature importance" title="What is influencing the BTC 4-hour prediction?" />
       <div className="space-y-4 px-5 pb-6 pt-1">
         {FEATURES.map((f, i) => (
-          <div key={f.name} className="grid grid-cols-[28px_200px_1fr_52px] items-center gap-4 text-[12.5px]">
+          <div key={f.name} className="grid grid-cols-[22px_minmax(0,1fr)_minmax(44px,0.7fr)_42px] items-center gap-2 text-[12px] sm:grid-cols-[28px_minmax(140px,200px)_1fr_52px] sm:gap-4 sm:text-[12.5px]">
             <span className="num text-fg-3">{String(i + 1).padStart(2, "0")}</span>
-            <span className="text-fg-2">{f.name}</span>
+            <span className="min-w-0 break-words text-fg-2">{f.name}</span>
             <Bar value={(f.value / max) * 100} tone="violet" />
             <span className="num text-right text-fg">{(f.value * 100).toFixed(0)}%</span>
           </div>
@@ -105,7 +105,8 @@ function Explorer() {
       </div>
       <Panel hover={false}>
         <PanelHeader eyebrow="Prediction explorer" title={`Predictions against outcomes · ${hit}/${rows.length} correct direction`} />
-        <table className="num w-full text-[12.5px]">
+        <div className="overflow-x-auto">
+        <table className="num min-w-[480px] w-full text-[12.5px]">
           <thead>
             <tr className="border-y hairline text-left text-fg-3">
               <th className="px-5 py-2.5 font-normal">#</th>
@@ -135,6 +136,7 @@ function Explorer() {
             })}
           </tbody>
         </table>
+        </div>
         <p className="px-5 py-3 text-[11px] text-fg-3">Illustrative history for the selected model ({model}) at {h} horizon.</p>
       </Panel>
     </div>

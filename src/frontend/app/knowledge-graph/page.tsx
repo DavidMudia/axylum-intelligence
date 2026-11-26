@@ -4,6 +4,7 @@ import { Play, RotateCcw, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Badge, Button, PageHeader, Panel, PanelHeader, Segmented, Tabs } from "@/components/glass";
+import { useSize } from "@/hooks/useSize";
 import { cn } from "@/lib/format";
 import { EDGES, GRAPH_SIZE, NODE_COLORS, NODES, RELATION_TYPES, SPARQL_PRESETS, nodeById, runSparql, toTurtle, type GEdge, type GNode, type NodeType } from "@backend/lib/graph";
 
@@ -50,11 +51,13 @@ function GlobeStage({
   const [dragging, setDragging] = useState(false);
   const closeButton = useRef<HTMLButtonElement>(null);
   const globeSvg = useRef<SVGSVGElement>(null);
+  const { ref: globeContainerRef, width: globeWidth } = useSize<HTMLDivElement>();
   const pointers = useRef(new Map<number, { x: number; y: number; startX: number; startY: number }>());
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const gestureMoved = useRef(false);
   const selectedNode = nodeById(selected);
+  const globeNodeHitRadius = globeWidth > 0 ? Math.max(14, (22 * 1000) / globeWidth) : 22;
   const connections = useMemo<Array<{ edge: GEdge; id: string; direction: "out" | "in" }>>(
     () => edges.reduce<Array<{ edge: GEdge; id: string; direction: "out" | "in" }>>((result, edge) => {
       if (edge.source === selected) result.push({ edge, id: edge.target, direction: "out" });
@@ -204,8 +207,8 @@ function GlobeStage({
           </button>
         </header>
 
-        <div className="mt-3 grid min-h-0 flex-1 grid-rows-[minmax(260px,1fr)_minmax(145px,26vh)] gap-3 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1">
-          <section className="relative min-h-0 overflow-hidden rounded-2xl border border-white/[0.07] bg-[radial-gradient(ellipse_at_center,rgba(91,141,239,0.1),rgba(7,9,13,0.2)_58%)]">
+        <div className="mt-3 grid min-h-0 flex-1 grid-rows-[minmax(150px,1fr)_minmax(110px,22dvh)] gap-2 sm:grid-rows-[minmax(200px,1fr)_minmax(120px,24dvh)] sm:gap-3 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1">
+          <section ref={globeContainerRef} className="relative min-h-0 overflow-hidden rounded-2xl border border-white/[0.07] bg-[radial-gradient(ellipse_at_center,rgba(91,141,239,0.1),rgba(7,9,13,0.2)_58%)]">
             <div className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full border border-white/10 bg-[#090c12]/80 p-1 backdrop-blur sm:left-4 sm:top-4">
               <button type="button" aria-label="Zoom out" onClick={() => zoomBy(0.82)} className="h-7 w-7 rounded-full text-sm text-fg-2 hover:bg-white/10 hover:text-fg">−</button>
               <span className="num min-w-10 text-center text-[10px] text-fg-3">{Math.round(zoom * 100)}%</span>
@@ -222,7 +225,7 @@ function GlobeStage({
               ref={globeSvg}
               viewBox="0 0 1000 1000"
               className="h-full w-full"
-              role="img"
+              role="group"
               aria-label="Interactive knowledge globe"
               style={{ touchAction: "none", cursor: dragging ? "grabbing" : "grab" }}
               onPointerDown={handlePointerDown}
@@ -290,7 +293,12 @@ function GlobeStage({
                     transform={`translate(${point.x},${point.y})`}
                     opacity={opacity}
                     pointerEvents={point.depth < -0.04 ? "none" : "auto"}
-                    style={{ cursor: "pointer", transition: "opacity .2s ease, transform .2s ease" }}
+                    role="button"
+                    tabIndex={point.depth < -0.04 ? -1 : 0}
+                    aria-hidden={point.depth < -0.04}
+                    aria-label={`Select ${node.label}`}
+                    aria-pressed={isSelected}
+                    style={{ cursor: "pointer", touchAction: "manipulation", transition: "opacity .2s ease, transform .2s ease" }}
                     onClick={() => {
                       if (gestureMoved.current) {
                         gestureMoved.current = false;
@@ -298,7 +306,14 @@ function GlobeStage({
                       }
                       selectNode(node.id);
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectNode(node.id);
+                      }
+                    }}
                   >
+                    <circle r={globeNodeHitRadius} fill="transparent" pointerEvents="all" />
                     {isSelected && <circle r="22" fill="none" stroke={color} strokeWidth="1.5" strokeOpacity="0.8" />}
                     <circle r={node.type === "Cryptocurrency" ? 13 : 10} fill={color} fillOpacity="0.24" stroke={color} strokeWidth="1.8" />
                     <circle r={node.type === "Cryptocurrency" ? 4 : 3} fill={color} />
@@ -396,6 +411,7 @@ function Graph({ selected, onSelect, relations, status, onStatusChange, windowH,
   windowH: Window;
   onWindowChange: (windowH: Window) => void;
 }) {
+  const { ref: graphRef, width: graphWidth } = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<string | null>(null);
   const [pulse, setPulse] = useState<number>(0);
   const [globeOpen, setGlobeOpen] = useState(false);
@@ -431,10 +447,11 @@ function Graph({ selected, onSelect, relations, status, onStatusChange, windowH,
     return s;
   }, [edges, focus]);
   const pulseEdge = EDGES[pulse];
+  const nodeHitRadius = graphWidth > 0 ? Math.max(14, (22 * GRAPH_SIZE.w) / graphWidth) : 14;
 
   return (
     <>
-      <div className="relative">
+      <div ref={graphRef} className="relative">
         <button
           type="button"
           onClick={() => setGlobeOpen(true)}
@@ -445,7 +462,7 @@ function Graph({ selected, onSelect, relations, status, onStatusChange, windowH,
         <svg
           viewBox={`0 0 ${GRAPH_SIZE.w} ${GRAPH_SIZE.h}`}
           className="block h-auto w-full"
-          role="img"
+          role="group"
           aria-label="Knowledge graph. Tap an empty area to open the globe."
           style={{ cursor: "zoom-in" }}
           onClick={() => setGlobeOpen(true)}
@@ -502,14 +519,25 @@ function Graph({ selected, onSelect, relations, status, onStatusChange, windowH,
                 key={n.id}
                 transform={`translate(${n.x},${n.y})`}
                 opacity={!visible ? 0.1 : dim ? 0.35 : 1}
-                style={{ cursor: "pointer", transition: "opacity .25s" }}
+                role="button"
+                tabIndex={visible ? 0 : -1}
+                aria-label={`Select ${n.label}`}
+                aria-hidden={!visible}
+                style={{ cursor: "pointer", touchAction: "manipulation", transition: "opacity .25s" }}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSelect(n.id);
                 }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelect(n.id);
+                  }
+                }}
                 onMouseEnter={() => setHover(n.id)}
                 onMouseLeave={() => setHover(null)}
               >
+                <circle r={nodeHitRadius} fill="transparent" pointerEvents="all" />
                 {pulsing && (
                   <circle r="9" fill="none" stroke={color} strokeWidth="1">
                     <animate attributeName="r" values="9;26" dur="2.2s" repeatCount="indefinite" />

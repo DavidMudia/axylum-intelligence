@@ -30,6 +30,11 @@ test("production operator login issues a signed secure cookie and rejects cross-
 
     const response = loginOperator(request, { username: "test-operator", password: "test-password" });
     assert.equal(response.status, 200);
+    const localHttpRequest = new Request("http://localhost:5174/api/auth/operator-login", {
+      method: "POST",
+      headers: { origin: "http://localhost:5174", host: "localhost:5174" },
+    });
+    assert.equal(loginOperator(localHttpRequest, { username: "test-operator", password: "test-password" }).status, 200);
     const cookie = response.headers.get("set-cookie");
     assert.match(cookie ?? "", /HttpOnly; Secure; SameSite=Strict/);
     const cookieHeader = cookie!.split(";")[0];

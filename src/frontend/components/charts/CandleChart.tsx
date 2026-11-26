@@ -87,7 +87,7 @@ export function CandleChart({
   const macdTop = height + (hR ? gap + hR : 0) + gap;
   const axisTop = total - axisH;
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const i = Math.round((e.clientX - rect.left - padL) / bw - 0.5) + start;
     setHover(i >= start && i < n ? i : null);
@@ -107,7 +107,14 @@ export function CandleChart({
   return (
     <div ref={ref} className="relative w-full select-none" style={{ height: total }}>
       {width > 0 && (
-        <svg width={width} height={total} onMouseMove={onMove} onMouseLeave={() => setHover(null)} className="block cursor-crosshair">
+      <svg
+        width={width}
+        height={total}
+        onPointerMove={onMove}
+        onPointerLeave={() => setHover(null)}
+        className="block cursor-crosshair"
+        style={{ touchAction: "pan-y" }}
+      >
           {/* grid */}
           {gridPrices.map((p) => (
             <g key={p}>

@@ -1,11 +1,14 @@
 # Axylum Intelligence Terminal
 
-Axylum is a BTCUSDT Spot market-data and paper-trading terminal. Binance public market data is collected into PostgreSQL; technical indicators, rule-based decisions, risk checks and simulated paper executions run on that persisted data. The application does not send exchange orders and does not use Binance trading credentials.
+Axylum currently runs a BTCUSDT Spot market-data and paper-trading terminal. Binance public market data is collected into PostgreSQL; technical indicators, rule-based decisions, risk checks and simulated paper executions run on that persisted data. The application does not send Binance exchange orders or use Binance trading credentials.
+
+MetaTrader 5 support includes additive account/market/order storage, signed Windows-bridge APIs, a demo-only order-intent and risk-preflight pipeline, and an MT5 account/market/positions interface under Trading. The bridge must run beside an authenticated Windows MT5 terminal; Vercel does not host it. Order submission is disabled unless `AXYLUM_MT5_DEMO_TRADING_ENABLED=true`, and live accounts are rejected. Real demo-account execution, MT5 strategy compatibility, and cross-currency portfolio aggregation remain unverified or unimplemented. See the [deployment guide](./docs/DEPLOYMENT.md#metatrader-5-bridge-and-demo-execution) for setup and boundaries.
 
 ## Documentation
 
 - [How to use Axylum](./docs/USER_GUIDE.md) — a practical guide to the six primary sections and paper-trading workflow.
 - [Local development and production deployment](./docs/DEPLOYMENT.md) — environment setup, Docker Compose, HTTPS, operations, backups and recovery.
+- [Responsive and PWA setup](./docs/DEPLOYMENT.md#responsive-app-installable-pwa-and-offline-behavior) — install guidance, offline boundaries and notification status.
 
 ## Quick local setup
 
@@ -44,9 +47,12 @@ For a Vercel-hosted web app with Neon PostgreSQL, see the Vercel + Neon instruct
 ```sh
 npm run typecheck
 npm run test:market-data
+npm run test:mt5
 npm run test:phase2
 npm run test:auth
 npm run build
 ```
 
 Backtests and paper trades are simulations, not evidence that a strategy will be profitable. Review out-of-sample results and the assumptions documented in the user guide before enabling a strategy.
+
+The web app includes responsive desktop/mobile layouts and an installable PWA shell. Offline mode is limited to the generic fallback and static app assets; authenticated pages, account data, market responses and trading APIs are never cached. Browser notification permission is available in Settings, but server-delivered trading alerts still require push subscription storage and event delivery infrastructure.

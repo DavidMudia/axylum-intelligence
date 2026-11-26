@@ -32,7 +32,11 @@ function candleKey(candle: MarketCandle): string {
 }
 
 async function main(): Promise<void> {
-  releaseWorkerLock = await acquireWorkerLock(pool, 83_710_422, "Binance market-data");
+  releaseWorkerLock = await acquireWorkerLock(pool, 83_710_422, "Binance market-data", (error) => {
+    console.error(`[market-data] worker lock connection failed: ${error.message}`);
+    process.exitCode = 1;
+    process.kill(process.pid, "SIGTERM");
+  });
   const symbol = (process.env.MARKET_SYMBOL ?? "BTCUSDT").trim().toUpperCase();
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) throw new Error("MARKET_SYMBOL must be a Binance spot symbol, such as BTCUSDT");
 

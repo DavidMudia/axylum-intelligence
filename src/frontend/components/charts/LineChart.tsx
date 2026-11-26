@@ -50,12 +50,13 @@ export function LineChart({
           width={width}
           height={height}
           className="block"
-          onMouseMove={(e) => {
+          onPointerMove={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             const i = Math.round(((e.clientX - r.left - padL) / w) * (n - 1));
             setHover(i >= 0 && i < n ? i : null);
           }}
-          onMouseLeave={() => setHover(null)}
+          onPointerLeave={() => setHover(null)}
+          style={{ touchAction: "pan-y" }}
         >
           <defs>
             {series.map((s, k) => (

@@ -2,6 +2,8 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@backend/db";
 import { systemState, userSessions, users } from "@backend/db/schema";
+import { isSameOriginRequest } from "./request-origin";
+export { isSameOriginRequest } from "./request-origin";
 
 const COOKIE_NAME = "axylum_session";
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -50,23 +52,6 @@ function readCookie(request: Request, name: string): string | null {
     if (key === name) return value.join("=") || null;
   }
   return null;
-}
-
-export function isSameOriginRequest(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return !isProduction();
-  try {
-    const originUrl = new URL(origin);
-    const forwardedHost = request.headers.get("x-forwarded-host");
-    const requestHost = forwardedHost?.split(",")[0].trim() ?? request.headers.get("host");
-    return Boolean(
-      requestHost &&
-      originUrl.host.toLowerCase() === requestHost.toLowerCase() &&
-      (!isProduction() || originUrl.protocol === "https:"),
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function normalizeEmail(email: string): string {

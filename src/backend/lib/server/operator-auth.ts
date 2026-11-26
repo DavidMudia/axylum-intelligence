@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { isSameOriginRequest } from "./request-origin";
 
 const COOKIE_NAME = "axylum_operator";
 const SESSION_SECONDS = 8 * 60 * 60;
@@ -34,23 +35,6 @@ function parseCookie(request: Request, name: string): string | null {
     if (key === name) return value.join("=") || null;
   }
   return null;
-}
-
-function isSameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return process.env.NODE_ENV !== "production";
-  try {
-    const originUrl = new URL(origin);
-    const forwardedHost = request.headers.get("x-forwarded-host");
-    const requestHost = forwardedHost?.split(",")[0].trim() ?? request.headers.get("host");
-    return Boolean(
-      requestHost &&
-      originUrl.host.toLowerCase() === requestHost.toLowerCase() &&
-      (process.env.NODE_ENV !== "production" || originUrl.protocol === "https:"),
-    );
-  } catch {
-    return false;
-  }
 }
 
 function hasValidSession(request: Request): boolean {
@@ -99,7 +83,7 @@ export async function authorizeOperator(request: Request, mutation = false): Pro
 }
 
 export async function authorizeAdministrator(request: Request, mutation = false): Promise<Response | null> {
-  if (mutation && !isSameOrigin(request)) {
+  if (mutation && !isSameOriginRequest(request)) {
     return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
   }
   const legacyOperator = isOperatorAuthEnabled() && hasValidSession(request);
@@ -141,7 +125,7 @@ export function loginOperator(request: Request, body: { username?: unknown; pass
   if (!isOperatorAuthEnabled()) {
     return Response.json({ error: "Operator sign-in is only enabled in production." }, { status: 404 });
   }
-  if (!isSameOrigin(request)) return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
+  if (!isSameOriginRequest(request)) return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
   let config: ReturnType<typeof productionAuthConfig>;
   try {
     config = productionAuthConfig();

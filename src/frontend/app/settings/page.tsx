@@ -4,11 +4,14 @@ import { Badge, PageHeader, Panel, PanelHeader, Row } from "@/components/glass";
 import { cn } from "@/lib/format";
 import { ASSETS } from "@backend/lib/market";
 import { useUI } from "@/stores/ui";
+import { NotificationSettings } from "@/components/settings/NotificationSettings";
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
   return (
-    <button role="switch" aria-checked={on} aria-label={label} onClick={onChange} className={cn("relative h-5 w-9 rounded-full border transition-colors", on ? "border-accent/50 bg-accent/40" : "border-white/15 bg-white/[0.06]")}>
-      <span className={cn("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-fg transition-all", on ? "left-[18px]" : "left-0.5")} />
+    <button role="switch" aria-checked={on} aria-label={label} onClick={onChange} className="relative grid h-11 w-11 shrink-0 place-items-center">
+      <span className={cn("relative h-5 w-9 rounded-full border transition-colors", on ? "border-accent/50 bg-accent/40" : "border-white/15 bg-white/[0.06]")}>
+        <span className={cn("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-fg transition-all", on ? "left-[18px]" : "left-0.5")} />
+      </span>
     </button>
   );
 }
@@ -92,6 +95,7 @@ export default function Settings() {
           </div>
         </Panel>
       </div>
+      <NotificationSettings />
     </>
   );
 }

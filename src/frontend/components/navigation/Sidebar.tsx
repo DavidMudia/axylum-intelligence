@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/format";
@@ -41,7 +41,7 @@ export function NavList({ compact, onNavigate }: { compact?: boolean; onNavigate
             onClick={onNavigate}
             title={compact ? item.label : undefined}
             className={cn(
-              "group relative flex items-center gap-3 rounded-[10px] px-3 py-2 text-[13px] font-medium transition-colors",
+              "group relative flex min-h-11 items-center gap-3 rounded-[10px] px-3 py-2 text-[13px] font-medium transition-colors",
               compact && "justify-center px-0",
               active ? "bg-white/[0.06] text-fg" : "text-fg-3 hover:bg-white/[0.035] hover:text-fg-2",
             )}
@@ -55,6 +55,39 @@ export function NavList({ compact, onNavigate }: { compact?: boolean; onNavigate
             )}
             <Icon size={16} strokeWidth={1.6} className={cn(active ? "text-[#9db8f5]" : "")} />
             {!compact && <span>{item.label}</span>}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+const MOBILE_HREFS = ["/", "/markets", "/trading", "/intelligence"] as const;
+const MOBILE_ITEMS = [
+  ...MOBILE_HREFS.flatMap((href) => {
+    const item = NAV.find((entry) => entry.href === href);
+    return item ? [item] : [];
+  }),
+  { href: "/settings", label: "Settings", icon: Settings2, hint: "Account settings" },
+];
+
+export function MobileNav() {
+  const path = usePathname();
+  return (
+    <nav className="mobile-bottom-nav lg:hidden" aria-label="Mobile primary">
+      {MOBILE_ITEMS.map((item) => {
+        const Icon = item.icon;
+        const active = path === item.href || (item.href === "/intelligence" && path.startsWith("/investigation"));
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-label={item.label}
+            aria-current={active ? "page" : undefined}
+            className={cn("mobile-bottom-nav-item", active && "mobile-bottom-nav-item-active")}
+          >
+            <Icon size={18} strokeWidth={1.7} />
+            <span>{item.label}</span>
           </Link>
         );
       })}
