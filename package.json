@@ -1,0 +1,47 @@
+{
+  "name": "axylum-intelligence-terminal",
+  "private": true,
+  "scripts": {
+    "dev": "next dev src/frontend --port 5174",
+    "build": "next build src/frontend",
+    "start": "next start src/frontend --port 5174",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p src/frontend/tsconfig.json",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "market-data:worker": "tsx --tsconfig src/frontend/tsconfig.json src/backend/market-data/worker.ts",
+    "paper-trading:worker": "tsx --tsconfig src/frontend/tsconfig.json src/backend/intelligence/paper-worker.ts",
+    "test:market-data": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/market-data/normalize.test.ts src/backend/market-data/binance-spot-provider.test.ts src/frontend/lib/with-database-configuration.test.ts",
+    "test:phase2": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/intelligence/indicators.test.ts src/backend/intelligence/risk.test.ts src/backend/intelligence/backtest.test.ts",
+    "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "dotenv": "17.3.1",
+    "drizzle-orm": "0.45.2",
+    "framer-motion": "^14.14.0",
+    "lucide-react": "^1.80.0",
+    "next": "^16.4.6",
+    "pg": "8.20.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tsx": "^4.20.6",
+    "ws": "^8.18.3",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.17",
+    "@types/node": "22.19.15",
+    "@types/pg": "8.18.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "^16.4.6",
+    "postcss": "8.5.23",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3"
+  }
+}

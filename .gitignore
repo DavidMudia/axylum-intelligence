@@ -1,0 +1,16 @@
+node_modules/
+.next/
+src/frontend/.next/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+!.env.production.example
+backups/
+
+# Workstation-specific editor tasks and local runtime data
+src/.vscode/
+*.db
+*.sqlite
+*.sqlite3
+*.log

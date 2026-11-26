@@ -1,0 +1,166 @@
+name: axylum
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-axylum}
+      POSTGRES_USER: ${POSTGRES_USER:-axylum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Compose environment}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - internal
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    profiles: ["ops"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Compose database service}
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npm", "run", "db:migrate"]
+    restart: "no"
+    networks:
+      - internal
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Compose database service}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env.production}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env.production}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?Set AUTH_SESSION_SECRET in .env.production}
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 5174
+    command: ["./node_modules/.bin/next", "start", "src/frontend", "--hostname", "0.0.0.0", "--port", "5174"]
+    expose:
+      - "5174"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5174/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    networks:
+      - internal
+
+  market-data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Compose database service}
+      NODE_ENV: production
+      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-binance-spot}
+      MARKET_SYMBOL: ${MARKET_SYMBOL:-BTCUSDT}
+      MARKET_INTERVAL: ${MARKET_INTERVAL:-1m}
+      MARKET_BACKFILL_DAYS: ${MARKET_BACKFILL_DAYS:-30}
+      MARKET_ORDER_BOOK_DEPTH: ${MARKET_ORDER_BOOK_DEPTH:-100}
+      MARKET_ORDER_BOOK_SNAPSHOT_INTERVAL_MS: ${MARKET_ORDER_BOOK_SNAPSHOT_INTERVAL_MS:-30000}
+      MARKET_STALE_AFTER_MS: ${MARKET_STALE_AFTER_MS:-15000}
+      BINANCE_REST_BASE_URL: ${BINANCE_REST_BASE_URL:-https://api.binance.com}
+      BINANCE_WS_BASE_URL: ${BINANCE_WS_BASE_URL:-wss://stream.binance.com:9443}
+    command: ["./node_modules/.bin/tsx", "--tsconfig", "src/frontend/tsconfig.json", "src/backend/market-data/worker.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "try{process.kill(1,0)}catch{process.exit(1)}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    networks:
+      - internal
+
+  paper-trading:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Compose database service}
+      NODE_ENV: production
+      PAPER_TRADING_POLL_MS: ${PAPER_TRADING_POLL_MS:-5000}
+    command: ["./node_modules/.bin/tsx", "--tsconfig", "src/frontend/tsconfig.json", "src/backend/intelligence/paper-worker.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+      market-data:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "try{process.kill(1,0)}catch{process.exit(1)}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    networks:
+      - internal
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Compose environment}
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-axylum}
+      PGUSER: ${POSTGRES_USER:-axylum}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    command: ["/bin/sh", "/opt/axylum/backup.sh"]
+    volumes:
+      - ./ops/backup.sh:/opt/axylum/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge

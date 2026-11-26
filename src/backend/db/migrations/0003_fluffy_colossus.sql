@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "paper_orders_client_order_id_uidx" ON "paper_orders" USING btree ("client_order_id");

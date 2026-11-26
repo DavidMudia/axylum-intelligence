@@ -1,0 +1,22 @@
+name: axylum-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: axylum
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:-local-development-only}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - axylum_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axylum"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  axylum_dev_data:

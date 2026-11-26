@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-ink: #07090d;
+  --color-ink-2: #0b0e14;
+  --color-graphite: #141821;
+  --color-slate-glass: #121826;
+
+  --color-fg: #e8ebf2;
+  --color-fg-2: #a3abbb;
+  --color-fg-3: #6b7385;
+  --color-fg-4: #454c5c;
+
+  --color-accent: #5b8def;
+  --color-violet: #9585f2;
+  --color-up: #3fbf8f;
+  --color-down: #d9596c;
+  --color-warn: #d6a24a;
+
+  --radius-glass: 16px;
+  --radius-inner: 12px;
+}
+
+:root {
+  color-scheme: dark;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "tnum";
+  -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+}
+
+/* Soft ambient light sources behind the glass workspace */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(900px 600px at 12% -8%, rgba(91, 141, 239, 0.1), transparent 60%),
+    radial-gradient(800px 560px at 96% 4%, rgba(149, 133, 242, 0.08), transparent 60%),
+    radial-gradient(900px 700px at 50% 120%, rgba(91, 141, 239, 0.05), transparent 60%),
+    linear-gradient(180deg, #080a0f 0%, #07090d 100%);
+}
+
+::selection {
+  background: rgba(91, 141, 239, 0.35);
+}
+
+/* ---------- Glass materials ---------- */
+.glass {
+  background: linear-gradient(180deg, rgba(30, 35, 46, 0.55), rgba(20, 24, 33, 0.5));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-glass);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 20px 40px -24px rgba(0, 0, 0, 0.7),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.25s ease;
+}
+.glass-hover:hover {
+  border-color: var(--line-strong);
+}
+.glass-solid {
+  background: rgba(12, 15, 21, 0.78);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+}
+.glass-blue {
+  background: linear-gradient(180deg, rgba(91, 141, 239, 0.12), rgba(91, 141, 239, 0.05));
+  border: 1px solid rgba(91, 141, 239, 0.22);
+}
+.glass-violet {
+  background: linear-gradient(180deg, rgba(149, 133, 242, 0.12), rgba(149, 133, 242, 0.04));
+  border: 1px solid rgba(149, 133, 242, 0.22);
+}
+.glass-emerald {
+  background: linear-gradient(180deg, rgba(63, 191, 143, 0.11), rgba(63, 191, 143, 0.04));
+  border: 1px solid rgba(63, 191, 143, 0.22);
+}
+.glass-crimson {
+  background: linear-gradient(180deg, rgba(217, 89, 108, 0.12), rgba(217, 89, 108, 0.04));
+  border: 1px solid rgba(217, 89, 108, 0.24);
+}
+.hairline {
+  border-color: var(--line);
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-fg-3);
+  font-weight: 500;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+/* ---------- Motion ---------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+@keyframes flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes stage-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(91, 141, 239, 0);
+  }
+  50% {
+    box-shadow: 0 0 22px 0 rgba(91, 141, 239, 0.28);
+  }
+}
+@keyframes globe-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.99);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.015);
+  }
+}
+
+.anim-rise {
+  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.anim-slide {
+  animation: slide-in 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.anim-pulse {
+  animation: pulse-dot 2.4s ease-in-out infinite;
+}
+.anim-flow {
+  stroke-dasharray: 4 8;
+  animation: flow 1.2s linear infinite;
+}
+.anim-stage {
+  animation: stage-glow 3s ease-in-out infinite;
+}
+.kg-globe-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: globe-breathe 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

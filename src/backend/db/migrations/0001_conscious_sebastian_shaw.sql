@@ -1,0 +1,2 @@
+ALTER TABLE "market_ingestion_status" ADD COLUMN "order_book_sequence_healthy" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "market_order_book_updates" ADD COLUMN "sequence_valid" boolean DEFAULT false NOT NULL;
