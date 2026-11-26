@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hashPassword, isValidEmail, isValidPassword, normalizeEmail, verifyPassword } from "./user-auth";
+import { hashPassword, isUniqueConstraintViolation, isValidEmail, isValidPassword, normalizeEmail, verifyPassword } from "./user-auth";
 
 test("account email validation normalizes case and rejects malformed addresses", () => {
   assert.equal(normalizeEmail(" Person@Example.com "), "person@example.com");
@@ -16,4 +16,14 @@ test("account passwords require at least 12 characters and are verified from sal
   assert.equal(isValidPassword("short"), false);
   assert.equal(verifyPassword(password, hash), true);
   assert.equal(verifyPassword("different password", hash), false);
+});
+
+test("duplicate account errors are recognized when wrapped by the database driver", () => {
+  const postgresError = Object.assign(new Error("duplicate key"), { code: "23505" });
+  const drizzleError = Object.assign(new Error("query failed"), { cause: postgresError });
+  const unrelatedError = Object.assign(new Error("connection failed"), { code: "ECONNRESET" });
+
+  assert.equal(isUniqueConstraintViolation(postgresError), true);
+  assert.equal(isUniqueConstraintViolation(drizzleError), true);
+  assert.equal(isUniqueConstraintViolation(unrelatedError), false);
 });

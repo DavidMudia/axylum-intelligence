@@ -151,6 +151,17 @@ function bootstrapSecretConfigured(secret: string | undefined): secret is string
   return Boolean(secret && /^[a-f0-9]{64}$/i.test(secret));
 }
 
+export function isUniqueConstraintViolation(error: unknown): boolean {
+  const seen = new Set<object>();
+  let current = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if ("code" in current && current.code === "23505") return true;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 async function newSessionCookie(userId: string): Promise<{ cookie: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000);
@@ -298,7 +309,7 @@ export async function registerUser(
     if (error instanceof AuthFailure) {
       return Response.json({ error: error.message, code: error.code }, { status: error.status });
     }
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
+    if (isUniqueConstraintViolation(error)) {
       return Response.json({ error: "An account with this email already exists" }, { status: 409 });
     }
     throw error;
