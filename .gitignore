@@ -15,3 +15,5 @@ src/.vscode/
 *.sqlite3
 *.log
 .neon
+
+.vercel
