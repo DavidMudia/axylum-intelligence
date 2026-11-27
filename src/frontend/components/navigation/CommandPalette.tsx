@@ -5,16 +5,14 @@ import { CornerDownLeft, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ElementType } from "react";
 import { cn } from "@/lib/format";
-import { ASSETS } from "@backend/lib/market";
-import { MODELS, SOURCES } from "@backend/lib/ops";
 import { useUI } from "@/stores/ui";
 import { NAV } from "./nav";
-import { Cpu, Database, LineChart, OctagonAlert, PanelRight } from "lucide-react";
+import { LineChart, OctagonAlert, PanelRight } from "lucide-react";
 
 type Item = { id: string; group: string; label: string; hint?: string; icon: ElementType; run: () => void };
 
 export function CommandPalette() {
-  const { paletteOpen, setPalette, setAsset, streamOpen, setStreamOpen } = useUI();
+  const { paletteOpen, setPalette, streamOpen, setStreamOpen } = useUI();
   const router = useRouter();
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
@@ -34,9 +32,12 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (paletteOpen) {
-      setQ("");
-      setIdx(0);
-      setTimeout(() => input.current?.focus(), 20);
+      const timer = window.setTimeout(() => {
+        setQ("");
+        setIdx(0);
+        input.current?.focus();
+      }, 20);
+      return () => window.clearTimeout(timer);
     }
   }, [paletteOpen]);
 
@@ -47,19 +48,14 @@ export function CommandPalette() {
     };
     return [
       ...NAV.map((n) => ({ id: n.href, group: "Navigate", label: n.label, hint: n.hint, icon: n.icon, run: go(n.href) })),
-      ...ASSETS.map((a) => ({
-        id: a.symbol,
-        group: "Assets",
-        label: a.symbol,
-        hint: a.name,
+      {
+        id: "BTCUSDT",
+        group: "Markets",
+        label: "BTCUSDT",
+        hint: "Configured market-data pair",
         icon: LineChart,
-        run: () => {
-          setAsset(a.symbol);
-          go("/markets")();
-        },
-      })),
-      ...SOURCES.map((s) => ({ id: s.id, group: "Data sources", label: s.name, hint: s.channel, icon: Database, run: go("/data-sources") })),
-      ...MODELS.map((m) => ({ id: m.id, group: "Models", label: m.id, hint: `${m.algo} · ${m.version}`, icon: Cpu, run: go("/models") })),
+        run: go("/markets"),
+      },
       { id: "op-kill", group: "Operations", label: "Open emergency controls", hint: "Security", icon: OctagonAlert, run: go("/security") },
       {
         id: "op-stream",
@@ -73,14 +69,12 @@ export function CommandPalette() {
         },
       },
     ];
-  }, [router, setAsset, setPalette, setStreamOpen, streamOpen]);
+  }, [router, setPalette, setStreamOpen, streamOpen]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return s ? items.filter((i) => `${i.label} ${i.hint ?? ""} ${i.group}`.toLowerCase().includes(s)) : items;
   }, [items, q]);
-
-  useEffect(() => setIdx(0), [q]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
@@ -122,9 +116,12 @@ export function CommandPalette() {
               <input
                 ref={input}
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setIdx(0);
+                }}
                 onKeyDown={onKeyDown}
-                placeholder="Go to an asset, data source, model or operation…"
+                placeholder="Go to a page, market or operation…"
                 className="w-full bg-transparent text-[14px] text-fg outline-none placeholder:text-fg-3"
               />
               <kbd className="num rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-fg-3">ESC</kbd>

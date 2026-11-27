@@ -1,4 +1,5 @@
 import { getSessionUser } from "@backend/lib/server/user-auth";
+import { featureDenied, resolveEntitlement } from "@backend/lib/server/entitlements";
 import { createMt5OrderIntent, listMt5OrderHistory, Mt5OrderRequestError } from "@backend/mt5/service";
 import { Mt5PayloadError, parseMt5OrderRequest } from "@backend/mt5/validation";
 import { readMt5JsonBody } from "@backend/mt5/http";
@@ -11,6 +12,8 @@ export async function GET(request: Request) {
   return withDatabaseConfiguration(async () => {
     const user = await getSessionUser(request);
     if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
+    const denied = featureDenied(await resolveEntitlement(user.id), "mt5_demo");
+    if (denied) return denied;
     const accountId = new URL(request.url).searchParams.get("accountId") ?? "";
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(accountId)) {
       return Response.json({ error: "A valid accountId is required" }, { status: 400 });
@@ -25,6 +28,8 @@ export async function POST(request: Request) {
   return withDatabaseConfiguration(async () => {
     const user = await getSessionUser(request);
     if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
+    const denied = featureDenied(await resolveEntitlement(user.id), "mt5_demo");
+    if (denied) return denied;
     const parsedBody = await readMt5JsonBody(request, 32_768);
     if (!parsedBody.ok) return parsedBody.response;
     try {

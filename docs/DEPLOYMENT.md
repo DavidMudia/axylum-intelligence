@@ -92,12 +92,28 @@ Vercel can host the Next.js web app and API routes, and Neon can host PostgreSQL
 1. Link the GitHub repository to a Vercel project. Keep the project root at the repository root and leave the Next.js output directory on **Automatic**.
 2. In Vercel **Settings → Environment Variables**, set the following for Production (and Preview only if you intend to use the same Neon database there):
    - `DATABASE_URL` — Neon’s pooled connection URL. This is the app’s runtime connection.
-   - `AUTH_BOOTSTRAP_ADMIN_SECRET` — generate a new value with `openssl rand -hex 32`. Use it for the first production administrator account, then remove it from Vercel after signup.
-3. Keep the URL and setup secret server-side. Do not use `NEXT_PUBLIC_` or `VITE_` prefixes. Axylum continues to use its existing email/password and role system; the separately enabled Neon Auth service is not the app’s active identity provider.
-4. The checked-in database migrations must be applied to the Neon branch before first use. For future schema changes, set `DATABASE_URL_UNPOOLED` to Neon’s direct connection URL in a trusted local shell and run `npm run db:migrate`. Do not use the pooled URL for migrations.
-5. Deploy from the linked GitHub branch. Open the Vercel URL, choose **Sign up**, create the first account with the one-time setup code, and verify you can sign out and sign back in. Remove `AUTH_BOOTSTRAP_ADMIN_SECRET` from Vercel once the administrator account is created.
+   - `APP_BASE_URL` — the canonical HTTPS app URL used for Paystack callbacks and receipts.
+   - `CRON_SECRET` — a random secret of at least 32 characters for subscription expiration processing.
+   - `PAYSTACK_SECRET_KEY`, `PAYSTACK_STARTER_PLAN_CODE`, and `PAYSTACK_PROFESSIONAL_PLAN_CODE` — server-only Paystack credentials and the matching NGN monthly plans. Configure the Starter plan at ₦5,000/month and Professional at ₦10,000/month; checkout verifies the remote plan amount before creating a transaction.
+   - `EXCHANGE_CREDENTIALS_ENCRYPTION_KEY` — canonical base64-encoded 32-byte key used to encrypt saved exchange credentials and Paystack subscription-management tokens.
+3. Keep all URLs, API keys, and encryption/cron secrets server-side. Do not use `NEXT_PUBLIC_` or `VITE_` prefixes. Axylum continues to use its existing email/password and role system; the separately enabled Neon Auth service is not the app’s active identity provider.
+4. The checked-in database migrations must be applied to the Neon branch before first use. Review them and test them on a branch first. For future schema changes, set `DATABASE_URL_UNPOOLED` to Neon’s direct connection URL in a trusted local shell and run `npm run db:migrate`. Do not use the pooled URL for migrations.
+5. Deploy from the linked GitHub branch. New accounts receive Free access; the first registration is never promoted to administrator or owner. Register the intended founder email, then provision it explicitly from a trusted environment with the direct database URL and both email variables set to the same value:
 
-Only the pooled URL and bootstrap secret are required by the Vercel web runtime. `DATABASE_URL_UNPOOLED` is for trusted migrations and long-lived worker advisory locks, not a browser variable. Do not configure the local Docker Compose database URL (`@db:5432`) in Vercel.
+   ```powershell
+   $env:DATABASE_URL_UNPOOLED = "<trusted direct PostgreSQL URL>"
+   $env:AXYLUM_FOUNDER_EMAIL = "<founder account email>"
+   $env:AXYLUM_FOUNDER_CONFIRM_EMAIL = "<same founder account email>"
+   npm run founder:provision
+   ```
+
+   The command requires the founder account to exist and the migrations (including the five slot rows) to be applied. It promotes only that exact account to platform owner, assigns founder slot 1, and writes an audit event. It is idempotent and refuses to replace a different existing owner. Do not put the founder email or database URL in source control or public logs.
+6. Configure the Paystack webhook URL as `https://<your-domain>/api/billing/paystack/webhook`. The endpoint validates the Paystack signature and verifies successful transactions server-side. `vercel.json` schedules subscription expiration hourly; other hosts must invoke `GET /api/cron/subscriptions` with `Authorization: Bearer <CRON_SECRET>` at least hourly.
+7. Verify sign-up, Free access, a Paystack test-mode checkout and verification, webhook delivery, the founder account, and the owner-only complimentary slot dashboard before enabling live Paystack keys. A trial lasts seven days and must be started by the signed-in user. Complimentary accounts are represented only by slot assignments, not subscription or payment rows.
+
+Only server-side environment variables are used by the Vercel runtime. `DATABASE_URL_UNPOOLED` is for trusted migrations and founder provisioning, not a browser variable. Do not configure the local Docker Compose database URL (`@db:5432`) in Vercel.
+
+Subscription billing, complimentary access, billing screens, and user-scoped read-only Binance credential management are implemented in code. Full user-level isolation for the existing shared strategies, backtests, and paper-trading engine is not yet implemented; those legacy APIs are restricted to administrators rather than exposed to ordinary accounts. MT5 bridge self-registration/monitoring and broader user/subscription administration remain outstanding. Switching between active paid plans is blocked to prevent duplicate Paystack subscriptions; a safe scheduled upgrade/downgrade flow is still required. Do not treat Phase 4A as complete until those gaps are closed and tested.
 
 ## MetaTrader 5 bridge and demo execution
 
@@ -114,7 +130,7 @@ The integration provides owner-scoped account and market data, signed bridge API
 - `GET /api/mt5/accounts` (authenticated, owner-scoped, with broker login masked)
 - `GET` and `POST /api/mt5/orders` (authenticated and owner-scoped)
 
-The bridge token is generated out-of-band by `npm run mt5:bridge:provision -- <admin-email> <bridge-name>`. The command prints the token once and stores only its SHA-256 digest in PostgreSQL. Keep the token in a trusted Windows service environment, never in browser code, source control, or chat. Revoke a token with `npm run mt5:bridge:revoke -- <bridge-id>`. MT5 login passwords are not stored by Axylum; the bridge attaches to a terminal already logged into its broker account.
+The bridge token is generated out-of-band by `npm run mt5:bridge:provision -- <account-email> <bridge-name>`. The specified existing Axylum account becomes the bridge owner, allowing separate bridge identities per user. The command prints the token once and stores only its SHA-256 digest in PostgreSQL. Keep the token in a trusted Windows service environment, never in browser code, source control, or chat. Revoke a token with `npm run mt5:bridge:revoke -- <bridge-id>`. MT5 login passwords are not stored by Axylum; the bridge attaches to a terminal already logged into its broker account.
 
 The MT5 schema migrations are additive and leave Binance tables unchanged. Review [migration 0008](../src/backend/db/migrations/0008_harsh_absorbing_man.sql) and [migration 0009](../src/backend/db/migrations/0009_glossy_plazm.sql), back up the database, and apply both using a trusted direct connection before provisioning a bridge. Neither migration is applied automatically; do not run them against production without explicit authorization, review, and backup:
 
@@ -198,9 +214,9 @@ openssl rand -hex 32
 Edit `.env.production`:
 
 - Set `DOMAIN` to the DNS hostname.
-- Set `AUTH_BOOTSTRAP_ADMIN_SECRET` to a new `openssl rand -hex 32` value. Use it once to create the first administrator account, or to recover admin access if the database already contains an inaccessible administrator. Remove it from the server environment after use.
+- Optionally set `AUTH_BOOTSTRAP_ADMIN_SECRET` to a new `openssl rand -hex 32` value if you need a one-time administrator account. Normal sign-ups work without it and receive Free access; the code never grants founder privileges. Remove the configured secret after use.
 - Leave `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `AUTH_SESSION_SECRET` blank unless you explicitly want the legacy Operator login.
-- `EXCHANGE_CREDENTIALS_ENCRYPTION_KEY` is reserved for the future exchange connection API; it is not used yet and no exchange keys should be entered.
+- Set `EXCHANGE_CREDENTIALS_ENCRYPTION_KEY` to a canonical base64-encoded 32-byte value before enabling Binance key storage or Paystack subscription cancellation/resumption.
 - Generate a separate database password and set both `POSTGRES_PASSWORD` and the matching password inside `DATABASE_URL`. URL-encode any reserved characters; a generated hex password avoids reserved-character encoding.
 - Keep `DATABASE_URL` host set to `db`, not `localhost`.
 - Leave Binance Spot URLs public. No exchange keys are needed.
@@ -290,10 +306,10 @@ If Binance DNS or networking fails, inspect the collector logs and data freshnes
 
 - User accounts use email/password, salted scrypt hashes, database-backed revocable sessions and an 8-hour `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Account mutations verify same-origin requests. Five failed sign-in/sign-up attempts per forwarded client address are throttled for 15 minutes per web process.
 - Use HTTPS only, strong unique credentials and restricted SSH. For a single-user terminal, consider placing the site behind a VPN or an additional identity-aware proxy.
-- First production administrator setup and admin recovery are protected by a one-time `AUTH_BOOTSTRAP_ADMIN_SECRET`; subsequent public sign-ups are regular users. System-wide mutations and audit access require an administrator. The optional legacy Operator login remains supported.
+- All registrations start as Free user accounts. `AUTH_BOOTSTRAP_ADMIN_SECRET` optionally creates one administrator, while founder status requires the separate `npm run founder:provision` process described above. System-wide mutations and audit access require an administrator; complimentary allocation requires the founder. The optional legacy Operator login remains supported.
 - Email verification, MFA and password recovery are not implemented. Do not enable unrestricted public registration on a production deployment until those controls are added.
 - Health liveness and public market-data endpoints are unauthenticated by design. User-facing private APIs require sign-in.
-- User, session, exchange-connection and account-share tables are now modeled. Per-user exchange API management and per-user paper portfolios are not implemented yet; the existing paper portfolio remains shared.
+- Binance API credentials can be managed per user with read-only permissions and encrypted server-side storage. MT5 account/bridge records are user-associated, but self-service bridge provisioning is not implemented. Per-user strategies, backtests and paper portfolios are not implemented; those legacy APIs are administrator-only and the paper portfolio remains shared.
 - Do not enable Binance trading permissions. There is no live execution, leverage, short selling or withdrawal feature.
 - Backups are local to the VPS unless you configure encrypted off-site copies. Host-level resource alerts are not provisioned automatically.
 

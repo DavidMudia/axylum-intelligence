@@ -91,8 +91,21 @@ export async function authorizeAdministrator(request: Request, mutation = false)
   const { getSessionUser } = await import("./user-auth");
   const user = await getSessionUser(request);
   if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
-  if (user.role !== "admin") {
+  if (user.role !== "admin" && user.role !== "owner") {
     return Response.json({ error: "Administrator access required" }, { status: 403 });
+  }
+  return null;
+}
+
+export async function authorizePlatformOwner(request: Request, mutation = false): Promise<Response | null> {
+  if (mutation && !isSameOriginRequest(request)) {
+    return Response.json({ error: "Cross-origin request rejected" }, { status: 403 });
+  }
+  const { getSessionUser } = await import("./user-auth");
+  const user = await getSessionUser(request);
+  if (!user) return Response.json({ error: "Sign-in required" }, { status: 401 });
+  if (user.role !== "owner") {
+    return Response.json({ error: "Platform owner access required" }, { status: 403 });
   }
   return null;
 }

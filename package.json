@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p src/frontend/tsconfig.json",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "founder:provision": "tsx --tsconfig src/frontend/tsconfig.json src/backend/lib/server/provision-founder.ts",
     "mt5:bridge:provision": "tsx --tsconfig src/frontend/tsconfig.json src/backend/mt5/provision-bridge.ts",
     "mt5:bridge:revoke": "tsx --tsconfig src/frontend/tsconfig.json src/backend/mt5/revoke-bridge.ts",
     "market-data:worker": "tsx --tsconfig src/frontend/tsconfig.json src/backend/market-data/worker.ts",
@@ -16,7 +17,8 @@
     "test:market-data": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/market-data/normalize.test.ts src/backend/market-data/binance-spot-provider.test.ts src/frontend/lib/with-database-configuration.test.ts",
     "test:mt5": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/mt5/bridge-auth.test.ts src/backend/mt5/validation.test.ts",
     "test:phase2": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/intelligence/indicators.test.ts src/backend/intelligence/risk.test.ts src/backend/intelligence/backtest.test.ts",
-    "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts src/backend/lib/server/user-auth.test.ts src/backend/lib/server/exchange-credentials.test.ts src/frontend/lib/auth-response.test.ts"
+    "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts src/backend/lib/server/user-auth.test.ts src/backend/lib/server/exchange-credentials.test.ts src/frontend/lib/auth-response.test.ts",
+    "test:billing": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/paystack.test.ts src/backend/lib/server/entitlements.test.ts src/backend/lib/server/binance-connection.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

@@ -113,7 +113,7 @@ export function Sidebar() {
       <div className="mt-4 flex flex-col gap-3">
         {!collapsed && (
           <div className="rounded-[10px] border hairline bg-white/[0.025] px-3 py-2.5 text-[11px] leading-relaxed text-fg-3">
-            Market data is live when connected; the Knowledge Graph is illustrative; paper trades are simulated.
+            Market-data health is reported by the collector; graph data is not configured; paper trades are simulated.
           </div>
         )}
         <button

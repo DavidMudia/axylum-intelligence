@@ -1,104 +1,176 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { Sparkline } from "@/components/charts/LineChart";
-import { Badge, PageHeader, Panel, PanelHeader } from "@/components/glass";
-import { MarketChart } from "@/features/markets/MarketChart";
-import { cn } from "@/lib/format";
-import { assetIntel, EVIDENCE, PREDICTION, sentimentSeries } from "@backend/lib/intel";
-import { getAsset } from "@backend/lib/market";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowRight, RefreshCw } from "lucide-react";
+import { Badge, Button, PageHeader, Panel, PanelHeader } from "@/components/glass";
+import type { MarketAnalysis } from "@backend/intelligence/indicators";
 
-function EvidenceList({ title, tone, items }: { title: string; tone: "crimson" | "emerald"; items: typeof EVIDENCE }) {
-  return (
-    <Panel hover={false} tone={tone}>
-      <PanelHeader eyebrow={title} title={`${items.length} item${items.length === 1 ? "" : "s"}`} />
-      <div className="space-y-3 px-5 pb-5">
-        {items.map((e) => (
-          <div key={e.id} className="rounded-[10px] border border-white/8 bg-black/25 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="text-[12.5px] leading-snug text-fg">{e.title}</div>
-              <span className={cn("num text-[12px]", e.contribution >= 0 ? "text-up" : "text-down")}>
-                {e.contribution >= 0 ? "+" : "−"}
-                {Math.abs(e.contribution).toFixed(2)}
-              </span>
-            </div>
-            <div className="mt-1.5 text-[11px] text-fg-3">
-              {e.source} · <span className="num">{e.timestamp}</span> · reliability <span className="num">{e.reliability.toFixed(2)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
+type IntelligenceResponse = {
+  analysis: MarketAnalysis;
+  generatedAt: string;
+};
+
+function apiError(body: unknown, fallback: string) {
+  if (typeof body === "object" && body !== null && "error" in body && typeof body.error === "string") {
+    return body.error;
+  }
+  return fallback;
+}
+
+function metric(value: number | null, digits = 2) {
+  return value == null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
 }
 
 export default function Investigation() {
-  const asset = getAsset("BTC");
-  const intel = assetIntel("BTC");
-  const s = sentimentSeries("BTC");
+  const [analysis, setAnalysis] = useState<MarketAnalysis | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const response = await fetch("/api/intelligence?symbol=BTCUSDT&interval=1m", { cache: "no-store" });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(apiError(body, "Unable to load current market analysis."));
+      if (typeof body !== "object" || body === null || !("analysis" in body) || !("generatedAt" in body)) {
+        throw new Error("The intelligence response was invalid.");
+      }
+      const result = body as IntelligenceResponse;
+      setAnalysis(result.analysis);
+      setGeneratedAt(result.generatedAt);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load current market analysis.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(initial);
+  }, [refresh]);
+
+  const observedMetrics: Array<[string, number]> = analysis
+    ? [
+        ["Open", analysis.observed.open],
+        ["High", analysis.observed.high],
+        ["Low", analysis.observed.low],
+        ["Close", analysis.observed.close],
+        ["Base volume", analysis.observed.baseVolume],
+        ["Quote volume", analysis.observed.quoteVolume],
+      ]
+    : [];
+  const indicatorMetrics: Array<[string, number | null]> = analysis
+    ? [
+        ["RSI · 14", analysis.indicators.rsi14],
+        ["MACD histogram", analysis.indicators.macd.histogram],
+        ["EMA · 9", analysis.indicators.ema[9]],
+        ["EMA · 21", analysis.indicators.ema[21]],
+        ["EMA · 50", analysis.indicators.ema[50]],
+        ["EMA · 200", analysis.indicators.ema[200]],
+        ["Support", analysis.indicators.support],
+        ["Resistance", analysis.indicators.resistance],
+        ["ATR · 14", analysis.indicators.atr14],
+      ]
+    : [];
 
   return (
     <>
-      <Link href="/intelligence#evidence" className="mb-4 inline-flex items-center gap-1.5 text-[12px] text-fg-3 hover:text-fg">
-        <ArrowLeft size={13} /> Evidence explorer
-      </Link>
       <PageHeader
-        eyebrow={`Investigation · ${PREDICTION.id}`}
-        title="Why does the system believe this?"
-        description={`${PREDICTION.asset} · ${PREDICTION.horizon} horizon · ${PREDICTION.model} ${PREDICTION.version} · generated ${PREDICTION.generatedAt}`}
+        eyebrow="Market investigation · BTCUSDT · 1m"
+        title="Current analysis evidence"
+        description="Indicators and market regime are calculated from stored, closed Binance spot candles. This page does not present them as news, on-chain evidence, or a predictive model."
         actions={
-          <>
-            <Badge tone="crimson" dot>
-              {PREDICTION.stance} · {PREDICTION.strength}/100
-            </Badge>
-            <Badge tone="amber" dot>
-              {PREDICTION.decision}
-            </Badge>
-          </>
+          <Button onClick={() => void refresh()} disabled={refreshing}>
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "Refreshing" : "Refresh"}
+          </Button>
         }
       />
 
-      <MarketChart asset={asset} height={340} />
+      {error && (
+        <Panel hover={false} tone="crimson" className="mb-5 p-4">
+          <div className="text-[13px] font-medium text-fg">Analysis unavailable</div>
+          <p className="mt-1 text-[12px] text-fg-2">{error}</p>
+          <Link href="/data-sources" className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-[#9db8f5] hover:text-fg">
+            Check market-data collection <ArrowRight size={13} />
+          </Link>
+        </Panel>
+      )}
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        <EvidenceList title="Supporting the forecast" tone="crimson" items={EVIDENCE.filter((e) => e.stance === "supports")} />
-        <EvidenceList title="Contradicting the forecast" tone="emerald" items={EVIDENCE.filter((e) => e.stance === "contradicts")} />
-        <Panel hover={false} tone="violet">
-          <PanelHeader eyebrow="Context" title="Signals around the prediction" />
-          <div className="space-y-5 px-5 pb-5">
-            <div>
-              <div className="mb-2 flex items-center justify-between text-[12px]">
-                <span className="text-fg-2">Social sentiment · 48h</span>
-                <span className="num text-down">−0.34</span>
+      {analysis ? (
+        <div className="space-y-5">
+          <Panel hover={false} tone="violet">
+            <PanelHeader
+              eyebrow="Calculated market regime"
+              title={analysis.regime.label}
+              action={<Badge tone={analysis.regime.trend === "bullish" ? "emerald" : analysis.regime.trend === "bearish" ? "crimson" : "neutral"}>{analysis.regime.trend}</Badge>}
+            />
+            <div className="grid gap-4 px-5 pb-5 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div className="eyebrow">Volatility</div>
+                <div className="mt-1.5 text-[13px] capitalize text-fg">{analysis.regime.volatility}</div>
               </div>
-              <Sparkline data={s.map((d) => d.social)} color="#9585f2" width={260} height={36} />
+              <div>
+                <div className="eyebrow">Analysis confidence</div>
+                <div className="num mt-1.5 text-[13px] text-fg">{metric(analysis.confidence * 100, 1)}%</div>
+              </div>
+              <div>
+                <div className="eyebrow">Input candles</div>
+                <div className="num mt-1.5 text-[13px] text-fg">{analysis.provenance.candleCount}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Source</div>
+                <div className="mt-1.5 text-[13px] text-fg">{analysis.provenance.source}</div>
+              </div>
             </div>
-            <div>
-              <div className="eyebrow mb-1">On-chain</div>
-              {intel.onchain.slice(0, 3).map((m) => (
-                <div key={m.label} className="flex justify-between py-1.5 text-[12.5px]">
-                  <span className="text-fg-3">{m.label}</span>
-                  <span className={cn("num", m.tone === "neg" ? "text-down" : m.tone === "pos" ? "text-up" : "text-fg")}>{m.value}</span>
-                </div>
-              ))}
-            </div>
-            <div>
-              <div className="eyebrow mb-2">Knowledge graph</div>
-              <div className="space-y-2">
-                {intel.relations.slice(0, 3).map((r) => (
-                  <div key={r.rel} className="flex items-center justify-between text-[12.5px]">
-                    <span className="text-fg-2">
-                      <span className="num text-[11px] text-[#b9aef7]">{r.rel}</span> {r.target}
-                    </span>
-                    <Badge tone={r.status === "verified" ? "emerald" : "amber"}>{r.status}</Badge>
+          </Panel>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Panel hover={false}>
+              <PanelHeader eyebrow="Observed candle" title={`${analysis.symbol} · ${analysis.interval}`} />
+              <div className="grid grid-cols-2 gap-x-6 px-5 pb-5 sm:grid-cols-3">
+                {observedMetrics.map(([label, value]) => (
+                  <div key={label} className="border-b hairline py-3">
+                    <div className="eyebrow">{label}</div>
+                    <div className="num mt-1 text-[13px] text-fg">{metric(value, 4)}</div>
                   </div>
                 ))}
               </div>
-            </div>
+            </Panel>
+
+            <Panel hover={false}>
+              <PanelHeader eyebrow="Technical indicators" title="Values from the latest closed candle" />
+              <div className="grid grid-cols-2 gap-x-6 px-5 pb-5 sm:grid-cols-3">
+                {indicatorMetrics.map(([label, value]) => (
+                  <div key={label} className="border-b hairline py-3">
+                    <div className="eyebrow">{label}</div>
+                    <div className="num mt-1 text-[13px] text-fg">{metric(value, 4)}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
           </div>
-        </Panel>
-      </div>
+
+          <Panel hover={false} className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="text-[11.5px] text-fg-3">
+              Generated {generatedAt ? new Date(generatedAt).toLocaleString() : "—"} · Candle opened {new Date(String(analysis.candleOpenTime)).toLocaleString()}
+            </div>
+            <Link href="/markets" className="inline-flex items-center gap-1.5 text-[12px] text-[#9db8f5] hover:text-fg">
+              Inspect market data <ArrowRight size={13} />
+            </Link>
+          </Panel>
+        </div>
+      ) : (
+        !error && (
+          <Panel hover={false} className="p-8 text-center text-[13px] text-fg-3">
+            {refreshing ? "Loading stored market analysis…" : "No market analysis is available yet."}
+          </Panel>
+        )
+      )}
     </>
   );
 }

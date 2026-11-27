@@ -30,7 +30,7 @@ Requirements: Node.js 22+, npm, PostgreSQL 16+, and public internet access to Bi
    npm run paper-trading:worker
    ```
 
-4. Open [http://localhost:5174](http://localhost:5174), choose **Sign up**, and create an account. The first local account becomes the administrator.
+4. Open [http://localhost:5174](http://localhost:5174), choose **Sign up**, and create an account. New accounts start on Free; registration order never grants administrator or founder privileges. Provision the founder explicitly with `npm run founder:provision` after applying the subscription migrations.
 
 You can run PostgreSQL locally or start the development database with `docker compose -f compose.dev.yaml up -d db`. The worker processes are separate from the browser and web server. The paper worker only acts when paper trading is started from the Trading section.
 

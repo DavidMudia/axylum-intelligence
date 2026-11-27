@@ -26,10 +26,11 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull().default("user"),
+  trialUsedAt: marketTimestamp("trial_used_at"),
   createdAt: marketTimestamp("created_at").notNull().defaultNow(),
   updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
-  check("users_role_check", sql`${table.role} in ('admin', 'user')`),
+  check("users_role_check", sql`${table.role} in ('owner', 'admin', 'user')`),
   uniqueIndex("users_email_uidx").on(table.email),
 ]);
 
@@ -43,6 +44,168 @@ export const userSessions = pgTable(
     createdAt: marketTimestamp("created_at").notNull().defaultNow(),
   },
   (table) => [index("user_sessions_user_id_idx").on(table.userId), index("user_sessions_expires_at_idx").on(table.expiresAt)],
+);
+
+export const subscriptionPlans = pgTable(
+  "subscription_plans",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    currency: text("currency").notNull().default("NGN"),
+    amountMinor: integer("amount_minor").notNull(),
+    interval: text("interval").notNull().default("month"),
+    trialDays: integer("trial_days").notNull().default(0),
+    features: jsonb("features").$type<Record<string, boolean | number>>().notNull().default({}),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("subscription_plans_amount_check", sql`${table.amountMinor} >= 0`),
+    check("subscription_plans_interval_check", sql`${table.interval} = 'month'`),
+    check("subscription_plans_trial_days_check", sql`${table.trialDays} between 0 and 30`),
+  ],
+);
+
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    planId: text("plan_id").notNull().references(() => subscriptionPlans.id),
+    status: text("status").notNull().default("active"),
+    source: text("source").notNull().default("free"),
+    currentPeriodStart: marketTimestamp("current_period_start"),
+    currentPeriodEnd: marketTimestamp("current_period_end"),
+    trialEndsAt: marketTimestamp("trial_ends_at"),
+    graceEndsAt: marketTimestamp("grace_ends_at"),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    canceledAt: marketTimestamp("canceled_at"),
+    providerCustomerCode: text("provider_customer_code"),
+    providerSubscriptionCode: text("provider_subscription_code"),
+    providerEmailTokenCiphertext: text("provider_email_token_ciphertext"),
+    providerEmailTokenNonce: text("provider_email_token_nonce"),
+    providerEmailTokenTag: text("provider_email_token_tag"),
+    pendingPlanId: text("pending_plan_id").references(() => subscriptionPlans.id),
+    pendingPlanEffectiveAt: marketTimestamp("pending_plan_effective_at"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("subscriptions_status_check", sql`${table.status} in ('trialing', 'active', 'past_due', 'canceled', 'expired')`),
+    check("subscriptions_source_check", sql`${table.source} in ('free', 'paystack', 'trial')`),
+    uniqueIndex("subscriptions_user_uidx").on(table.userId),
+    uniqueIndex("subscriptions_provider_subscription_uidx").on(table.providerSubscriptionCode),
+    index("subscriptions_status_period_end_idx").on(table.status, table.currentPeriodEnd),
+    index("subscriptions_plan_status_idx").on(table.planId, table.status),
+  ],
+);
+
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    subscriptionId: uuid("subscription_id").references(() => subscriptions.id, { onDelete: "set null" }),
+    planId: text("plan_id").notNull().references(() => subscriptionPlans.id),
+    provider: text("provider").notNull().default("paystack"),
+    reference: text("reference").notNull(),
+    providerTransactionId: text("provider_transaction_id"),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("NGN"),
+    status: text("status").notNull().default("pending"),
+    paidAt: marketTimestamp("paid_at"),
+    receiptUrl: text("receipt_url"),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("payments_status_check", sql`${table.status} in ('pending', 'success', 'failed', 'refunded')`),
+    check("payments_amount_check", sql`${table.amountMinor} >= 0`),
+    uniqueIndex("payments_reference_uidx").on(table.reference),
+    uniqueIndex("payments_provider_transaction_uidx").on(table.provider, table.providerTransactionId),
+    index("payments_user_created_idx").on(table.userId, table.createdAt),
+    index("payments_status_created_idx").on(table.status, table.createdAt),
+  ],
+);
+
+export const paymentWebhookEvents = pgTable(
+  "payment_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull().default("paystack"),
+    eventKey: text("event_key").notNull(),
+    eventType: text("event_type").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    receivedAt: marketTimestamp("received_at").notNull().defaultNow(),
+    processedAt: marketTimestamp("processed_at"),
+  },
+  (table) => [
+    uniqueIndex("payment_webhook_events_provider_key_uidx").on(table.provider, table.eventKey),
+    index("payment_webhook_events_received_idx").on(table.receivedAt),
+  ],
+);
+
+export const complimentarySlots = pgTable(
+  "complimentary_slots",
+  {
+    slotNumber: integer("slot_number").primaryKey(),
+    founderSlot: boolean("founder_slot").notNull().default(false),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: marketTimestamp("assigned_at"),
+    assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("complimentary_slots_number_check", sql`${table.slotNumber} between 1 and 5`),
+    check("complimentary_slots_founder_check", sql`(${table.slotNumber} = 1 and ${table.founderSlot}) or (${table.slotNumber} between 2 and 5 and not ${table.founderSlot})`),
+    uniqueIndex("complimentary_slots_user_uidx").on(table.userId),
+  ],
+);
+
+export const complimentaryAccountEvents = pgTable(
+  "complimentary_account_events",
+  {
+    id: serial("id").primaryKey(),
+    slotNumber: integer("slot_number").notNull(),
+    targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    targetEmail: text("target_email").notNull(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    action: text("action").notNull(),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("complimentary_account_events_action_check", sql`${table.action} in ('founder_provisioned', 'assigned', 'revoked')`),
+    index("complimentary_account_events_created_idx").on(table.createdAt),
+    index("complimentary_account_events_slot_created_idx").on(table.slotNumber, table.createdAt),
+  ],
+);
+
+export const revenueLedger = pgTable(
+  "revenue_ledger",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
+    revenueType: text("revenue_type").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("NGN"),
+    status: text("status").notNull().default("verified"),
+    realizedProfit: numeric("realized_profit", { precision: 30, scale: 12 }),
+    highWaterMarkBefore: numeric("high_water_mark_before", { precision: 30, scale: 12 }),
+    highWaterMarkAfter: numeric("high_water_mark_after", { precision: 30, scale: 12 }),
+    userConsentAt: marketTimestamp("user_consent_at"),
+    auditDetails: jsonb("audit_details").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    check("revenue_ledger_type_check", sql`${table.revenueType} in ('subscription', 'performance_fee')`),
+    check("revenue_ledger_status_check", sql`${table.status} in ('verified', 'pending', 'reversed')`),
+    check("revenue_ledger_amount_check", sql`${table.amountMinor} >= 0`),
+    uniqueIndex("revenue_ledger_payment_uidx").on(table.paymentId),
+    index("revenue_ledger_type_created_idx").on(table.revenueType, table.createdAt),
+  ],
 );
 
 /** Exchange credentials are encrypted by the application before persistence. */
@@ -353,7 +516,7 @@ export const systemState = pgTable("system_state", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-/** Intelligence activity stream (illustrative records generated by the simulator). */
+/** Persisted activity events; no live event producer is currently configured. */
 export const activityEvents = pgTable("activity_events", {
   id: serial("id").primaryKey(),
   kind: text("kind").notNull(),

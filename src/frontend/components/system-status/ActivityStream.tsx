@@ -2,11 +2,13 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Ban, CheckCircle2, FileText, Network, Radar, Tag, Target, X, type LucideIcon } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge, StatusDot } from "@/components/glass";
 import { cn, fmtTime } from "@/lib/format";
 
 type Ev = { id: number; kind: string; title: string; detail: string; status: string; asset: string | null; createdAt: string };
+type ActivityResponse = { available?: boolean; reason?: string; events: Ev[] };
 
 const KIND: Record<string, { icon: LucideIcon; color: string }> = {
   anomaly: { icon: Radar, color: "text-warn" },
@@ -28,22 +30,35 @@ function statusTone(s: string) {
 
 export function ActivityStream({ onClose, className }: { onClose?: () => void; className?: string }) {
   const [events, setEvents] = useState<Ev[]>([]);
+  const [available, setAvailable] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
         const r = await fetch("/api/activity", { cache: "no-store" });
-        if (r.ok && alive) setEvents((await r.json()).events);
-      } catch {
-        /* ignore */
+        const body = await r.json() as ActivityResponse & { error?: string };
+        if (!r.ok) throw new Error(body.error ?? `Activity request failed (${r.status})`);
+        if (!Array.isArray(body.events)) throw new Error("Activity response was invalid.");
+        if (alive) {
+          setEvents(body.events);
+          setAvailable(body.available !== false);
+          setReason(body.reason ?? "");
+          setError("");
+          setCheckedAt(new Date().toISOString());
+        }
+      } catch (loadError) {
+        if (alive) setError(loadError instanceof Error ? loadError.message : "Activity feed is unavailable.");
       }
     };
-    load();
-    const t = setInterval(load, 6000);
+    void load();
+    const t = window.setInterval(() => void load(), 6000);
     return () => {
       alive = false;
-      clearInterval(t);
+      window.clearInterval(t);
     };
   }, []);
 
@@ -53,8 +68,8 @@ export function ActivityStream({ onClose, className }: { onClose?: () => void; c
         <div>
           <div className="eyebrow">Live intelligence</div>
           <div className="mt-1 flex items-center gap-2 text-[13px] text-fg">
-            <StatusDot status="ok" pulse />
-            Streaming
+            <StatusDot status={error ? "down" : available ? "ok" : "degraded"} pulse />
+            {error ? "Unavailable" : available ? "Connected" : "Not connected"}
           </div>
         </div>
         {onClose && (
@@ -99,9 +114,20 @@ export function ActivityStream({ onClose, className }: { onClose?: () => void; c
             );
           })}
         </AnimatePresence>
-        {!events.length && <div className="px-3 py-8 text-center text-[12.5px] text-fg-3">Waiting for events…</div>}
+        {!events.length && (
+          <div className="px-3 py-8 text-center">
+            <p className="text-[12.5px] text-fg-3">
+              {error || reason || (available ? "No recent activity has been recorded." : "A live activity-event producer is not configured.")}
+            </p>
+            <Link href="/intelligence" className="mt-3 inline-flex text-[11.5px] text-[#9db8f5] hover:text-fg">
+              View current market analysis
+            </Link>
+          </div>
+        )}
       </div>
-      <div className="border-t hairline px-5 py-2.5 text-[10.5px] text-fg-3">Illustrative records, not live observations.</div>
+      <div className="border-t hairline px-5 py-2.5 text-[10.5px] text-fg-3">
+        {checkedAt ? `Checked ${new Date(checkedAt).toLocaleTimeString()}` : "Checking activity feed…"}
+      </div>
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Badge } from "@/components/glass";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useUI } from "@/stores/ui";
 import { readAuthResponse, type AuthApiResponse } from "@/lib/auth-response";
 import { MobileNav } from "./Sidebar";
@@ -11,8 +13,50 @@ type SessionState = "checking" | "authenticated" | "signed-out";
 type AuthMode = "login" | "signup" | "operator";
 type AuthUser = { email: string; role: string };
 
+function restrictedPage(role: string | undefined, pathname: string) {
+  const isOperator = role === "admin" || role === "owner";
+  if (pathname === "/" && !isOperator) {
+    return {
+      title: "Your Axylum workspace",
+      description: "Market analysis, account connections, and subscription management are available below. Strategy and paper-trading systems are still shared operator-managed resources, not personal accounts.",
+      links: [
+        { href: "/markets", label: "Open markets" },
+        { href: "/intelligence", label: "View intelligence" },
+        { href: "/accounts", label: "Manage accounts" },
+        { href: "/billing", label: "Manage subscription" },
+      ],
+    };
+  }
+  if (!isOperator && (pathname === "/strategy-lab" || pathname === "/trading")) {
+    return {
+      title: "Personal trading workspace unavailable",
+      description: "The current strategy catalog and paper portfolio are shared operator-managed systems. Controls are disabled here to prevent access to shared trading data. User-owned strategy and paper accounts are not yet configured.",
+      links: [
+        { href: "/billing", label: "Review plan access" },
+        { href: "/accounts", label: "Manage integrations" },
+      ],
+    };
+  }
+  if (!isOperator && (pathname === "/system" || pathname === "/security")) {
+    return {
+      title: "Operator-only controls",
+      description: "Runtime diagnostics and emergency trading controls are available only to platform operators.",
+      links: [{ href: "/markets", label: "Return to markets" }],
+    };
+  }
+  if (role !== "owner" && pathname === "/admin") {
+    return {
+      title: "Platform-owner access required",
+      description: "Platform administration is restricted to the explicitly provisioned founder account.",
+      links: [{ href: "/", label: "Return to your workspace" }],
+    };
+  }
+  return null;
+}
+
 export function OperatorGate({ children }: { children: ReactNode }) {
   const refreshSystem = useUI((state) => state.refreshSystem);
+  const pathname = usePathname();
   const [session, setSession] = useState<SessionState>("checking");
   const [mode, setMode] = useState<AuthMode>("login");
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -26,6 +70,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
   const [operatorLoginAvailable, setOperatorLoginAvailable] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const restricted = restrictedPage(user?.role, pathname);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -54,8 +99,13 @@ export function OperatorGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (session !== "authenticated") return;
-    void refreshSystem();
-    const timer = window.setInterval(() => void refreshSystem(), 15000);
+    const refresh = () => {
+      void refreshSystem().catch((reason) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 15000);
     return () => window.clearInterval(timer);
   }, [refreshSystem, session]);
 
@@ -176,7 +226,7 @@ export function OperatorGate({ children }: { children: ReactNode }) {
             <span className="min-w-0 max-w-[min(180px,45vw)] sm:max-w-[220px]">
               <span className="block truncate text-[11px] font-medium text-fg">{user?.email ?? "Signed in"}</span>
               <span className="mt-0.5 block text-[9px] uppercase tracking-[0.14em] text-fg-4">
-                {user?.role === "admin" ? "Administrator" : user?.role ?? "Account"}
+                {user?.role === "owner" ? "Platform owner" : user?.role === "admin" ? "Administrator" : user?.role ?? "Account"}
               </span>
             </span>
             <ChevronDown size={14} className="shrink-0 text-fg-4 transition-transform group-open:rotate-180" />
@@ -185,10 +235,15 @@ export function OperatorGate({ children }: { children: ReactNode }) {
             <div className="px-4 py-3">
               <div className="text-[9px] uppercase tracking-[0.16em] text-fg-4">Signed in to Axylum</div>
               <div className="mt-1 break-all text-[12px] text-fg">{user?.email ?? "Account"}</div>
-              <Badge tone={user?.role === "admin" ? "blue" : "amber"} className="mt-2">
-                {(user?.role ?? "user").toUpperCase()}
+              <Badge tone={user?.role === "owner" ? "violet" : user?.role === "admin" ? "blue" : "amber"} className="mt-2">
+                {user?.role === "owner" ? "FOUNDER" : (user?.role ?? "user").toUpperCase()}
               </Badge>
             </div>
+            {user?.role === "owner" && (
+              <Link href="/admin" className="block border-t hairline px-4 py-3 text-[12px] text-fg-2 transition-colors hover:bg-white/[0.05] hover:text-fg">
+                Platform administration
+              </Link>
+            )}
             {error && <p role="alert" className="mx-3 mb-2 rounded-lg border border-down/20 bg-down/5 px-2.5 py-2 text-[11px] text-down">{error}</p>}
             <div className="border-t hairline p-1.5">
               <button
@@ -204,12 +259,25 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           </div>
         </details>
       </div>
-      {user?.role !== "admin" && (
+      {user?.role !== "admin" && user?.role !== "owner" && (
         <div className="border-b hairline bg-white/[0.02] px-4 py-2 text-center text-[11px] text-fg-3">
-          Read-only account. The current paper portfolio and strategies are shared system simulations, not personal portfolios.
+          Strategy and paper-trading systems remain operator-managed; they are not personal user accounts.
         </div>
       )}
-      {children}
+      {restricted ? (
+        <main className="mx-auto max-w-[760px] px-4 py-16 text-center">
+          <div className="eyebrow">Feature unavailable for this account</div>
+          <h1 className="mt-2 text-[22px] font-semibold text-fg">{restricted.title}</h1>
+          <p className="mx-auto mt-3 max-w-xl text-[13px] leading-relaxed text-fg-3">{restricted.description}</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {restricted.links.map((item) => (
+              <Link key={item.href} href={item.href} className="rounded-lg border hairline px-4 py-2.5 text-[12px] text-fg-2 transition-colors hover:bg-white/[0.05] hover:text-fg">
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </main>
+      ) : children}
       <MobileNav />
     </>
   );

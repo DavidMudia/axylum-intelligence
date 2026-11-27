@@ -14,6 +14,17 @@ export function isDatabaseConfigurationError(error: unknown): error is DatabaseC
   );
 }
 
+export function isMissingDatabaseRelationError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth++) {
+    if (typeof current !== "object" || current === null) return false;
+    const wrapped = current as { code?: unknown; cause?: unknown };
+    if (wrapped.code === "42P01") return true;
+    current = wrapped.cause;
+  }
+  return false;
+}
+
 export function getDatabaseUrl(): string {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new DatabaseConfigurationError();

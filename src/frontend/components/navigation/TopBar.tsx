@@ -1,7 +1,8 @@
 "use client";
 
-import { Menu, PanelRight, Search, Settings2 } from "lucide-react";
+import { ArrowLeft, Menu, PanelRight, Search, Settings2 } from "lucide-react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/glass";
 import { HealthMenu } from "@/components/system-status/HealthMenu";
@@ -37,6 +38,13 @@ function Clock() {
 
 export function TopBar() {
   const { setPalette, setMobileNav, system, streamOpen, setStreamOpen, setStreamDrawer } = useUI();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const goBack = () => {
+    if (window.history.length > 1) router.back();
+    else router.push("/");
+  };
 
   const toggleStream = () => {
     if (window.matchMedia("(min-width: 1280px)").matches) setStreamOpen(!streamOpen);
@@ -50,11 +58,22 @@ export function TopBar() {
       </button>
 
       <button
+        type="button"
+        onClick={goBack}
+        disabled={pathname === "/"}
+        aria-label="Go back"
+        title="Go back"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border hairline bg-white/[0.03] text-fg-2 transition-colors hover:bg-white/[0.07] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <ArrowLeft size={17} />
+      </button>
+
+      <button
         onClick={() => setPalette(true)}
         className="group flex h-11 min-w-0 w-full max-w-[420px] flex-1 items-center gap-2 rounded-[10px] border hairline bg-white/[0.03] px-2.5 text-left text-[13px] text-fg-3 transition-colors hover:border-white/15 hover:bg-white/[0.05] sm:gap-3 sm:px-3"
       >
         <Search size={14} />
-        <span className="flex-1 truncate">Search assets, sources, models…</span>
+        <span className="flex-1 truncate">Go to a page, market or operation…</span>
         <kbd className="num hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-fg-3 sm:block">Ctrl K</kbd>
       </button>
 

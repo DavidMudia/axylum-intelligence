@@ -24,3 +24,19 @@ test("does not suppress unrelated backend errors", async () => {
     /database connection refused/,
   );
 });
+
+test("reports a missing database relation as an unapplied-migration response", async () => {
+  const missingRelation = Object.assign(new Error("query failed"), {
+    cause: Object.assign(new Error('relation "subscription_plans" does not exist'), { code: "42P01" }),
+  });
+  const response = await withDatabaseConfiguration(async () => {
+    throw missingRelation;
+  });
+
+  assert.ok(response instanceof Response);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: "A required database table is missing. Apply the database migrations for this deployment, then retry.",
+    code: "database_migration_required",
+  });
+});

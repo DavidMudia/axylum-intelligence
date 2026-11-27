@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { OctagonAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { ActivityStream } from "@/components/system-status/ActivityStream";
 import { useUI } from "@/stores/ui";
 import { CommandPalette } from "./CommandPalette";
@@ -13,6 +14,10 @@ import { PwaRuntime } from "./PwaRuntime";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { streamOpen, streamDrawer, setStreamDrawer, mobileNav, setMobileNav, system } = useUI();
+
+  useEffect(() => {
+    void useUI.persist.rehydrate();
+  }, []);
 
   return (
     <div className="app-viewport flex overflow-hidden">

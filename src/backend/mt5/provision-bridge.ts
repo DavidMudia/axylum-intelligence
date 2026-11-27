@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { mt5Bridges, users } from "@backend/db/schema";
@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const email = emailArgument?.trim().toLowerCase();
   const name = nameArgument?.trim();
   if (!email || !name || name.length > 100) {
-    throw new Error("Usage: npm run mt5:bridge:provision -- <admin-email> <bridge-name>");
+    throw new Error("Usage: npm run mt5:bridge:provision -- <account-email> <bridge-name>");
   }
   const databaseUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL_UNPOOLED or DATABASE_URL is required.");
@@ -18,9 +18,9 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   try {
     const db = drizzle(pool);
-    const [owner] = await db.select({ id: users.id, role: users.role }).from(users)
-      .where(and(eq(users.email, email), eq(users.role, "admin"))).limit(1);
-    if (!owner) throw new Error("The specified admin account was not found.");
+    const [owner] = await db.select({ id: users.id }).from(users)
+      .where(eq(users.email, email)).limit(1);
+    if (!owner) throw new Error("The specified account was not found.");
 
     const id = randomUUID();
     const token = randomBytes(32).toString("hex");

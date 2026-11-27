@@ -17,9 +17,9 @@ The API health check is available at `/api/health`. Its public response is inten
 
 Choose **Sign up** on the sign-in screen and create an account with an email address and a password of at least 12 characters. Passwords are stored as salted scrypt hashes. Sign-in sessions are stored as revocable database records; the browser receives only an `HttpOnly` session cookie.
 
-On a fresh local database, the first account becomes the administrator unless legacy Operator credentials are configured. In production, the initial administrator uses `AUTH_BOOTSTRAP_ADMIN_SECRET` unless legacy Operator login is configured. Later sign-ups receive a regular-user role. Regular users can view the shared terminal, while system-wide changes require an administrator.
+Every sign-up starts on Free with a regular-user role. Registration order never grants administrator or founder privileges. The intended founder account must be explicitly provisioned with `npm run founder:provision` after applying the subscription migrations. The optional `AUTH_BOOTSTRAP_ADMIN_SECRET` can create one administrator account but never grants platform-owner privileges.
 
-If the database already has an administrator but you cannot access it, there is no pre-issued password to retrieve. Configure a new 64-character hexadecimal `AUTH_BOOTSTRAP_ADMIN_SECRET` in the server environment and restart the app. The sign-up screen will then offer a one-time administrator setup code; create an account with that code to establish another administrator. Remove the configured secret from the environment after it is consumed. The legacy Operator login is also available when its server-side environment credentials are configured.
+If the database already has an administrator but you cannot access it, there is no pre-issued password to retrieve. Configure a new 64-character hexadecimal `AUTH_BOOTSTRAP_ADMIN_SECRET` in the server environment and restart the app. The sign-up screen will then offer a one-time administrator setup code; create an account with that code to establish another administrator. Remove the configured secret from the environment after it is consumed. The legacy Operator login is also available when its server-side environment credentials are configured. Only the separately provisioned platform owner can assign or revoke the four additional permanent Professional slots.
 
 Email verification and self-service password recovery are not implemented yet. Do not treat open registration as production-ready for a public audience until those account-recovery and abuse-protection controls are added. Never share passwords or setup codes in chat.
 
@@ -49,6 +49,8 @@ Open **Knowledge Graph** from the sidebar to explore and query example entities 
 
 ### Strategy Lab
 
+The existing strategy configuration and historical backtest APIs operate on the legacy shared system engine and are restricted to administrator accounts. They are not yet user-owned strategy workspaces and are not available as a personal Free/Starter subscription feature.
+
 The initial catalog contains:
 
 - **EMA Trend Confirmation** — a long-only EMA crossover filtered by long trend, RSI and volume.
@@ -62,7 +64,7 @@ Backtests are hypothetical, depend on the execution assumptions and do not guara
 
 ### Trading
 
-The current paper portfolio is a shared system simulation in USDT, not a private per-user portfolio. It displays cash, equity, realized/unrealized P&L, exposure, fees/slippage, positions, recent orders and decisions.
+The current paper portfolio is a shared system simulation in USDT, not a private per-user portfolio. It is not exposed to regular user accounts while data isolation is incomplete. When available to an administrator, it displays cash, equity, realized/unrealized P&L, exposure, fees/slippage, positions, recent orders and decisions.
 
 1. In Strategy Lab, review the rules and activate only the strategy you intend to test.
 2. Review and save the risk limits. Defaults are conservative paper-only values: `0.5%` maximum equity risk per entry, `2%` daily loss, `10%` drawdown, `10%` position size, one concurrent position and at least `2:1` reward/risk.
@@ -78,6 +80,14 @@ Check PostgreSQL, Binance collector state, WebSocket/order-book sequence, last d
 
 Application resource data is for the web process/container; use Docker/VPS monitoring for whole-host CPU, memory, disk and alerting. Backups are managed separately in production deployment.
 
+### Billing
+
+Open **Billing** to compare Free, Starter and Professional access, start a one-time seven-day Starter or Professional trial, begin a Paystack checkout, manage Paystack renewal, and inspect verified payment history. Checkout completion in the browser is not sufficient to activate access; Axylum checks the transaction with Paystack or processes a signed webhook. Complimentary Professional access is shown without a renewal or expiration date.
+
+### Accounts
+
+Open **Accounts** to connect a Binance API key after the server validates it with Binance. Only read-only keys are accepted; keys reporting trading or withdrawal permissions are rejected. The backend encrypts credentials and only returns connection status/labels. Disconnecting deletes the saved credentials. MT5 accounts shown here are user-scoped and demo-only, but bridge provisioning is still an out-of-band operator task.
+
 ## Common states and fixes
 
 | What you see | Meaning and next check |
@@ -89,13 +99,14 @@ Application resource data is for the web process/container; use Docker/VPS monit
 | Rejected paper order | Read its recorded risk details; adjust valid settings only if appropriate. Limits are intentionally enforced server-side. |
 | Collector reconnecting / unhealthy book sequence | Check DNS/network access to Binance and worker logs; the collector retries and resynchronizes its order-book snapshot. |
 | Sign-in or sign-up reports a database error | Apply migrations and check PostgreSQL availability. |
-| First production sign-up requires a setup code | Configure `AUTH_BOOTSTRAP_ADMIN_SECRET` in the server environment and use that value only in the first-admin setup form. |
+| You need an administrator account | A standard sign-up works without a setup code and receives Free access. An operator can optionally configure `AUTH_BOOTSTRAP_ADMIN_SECRET` to create a one-time administrator; this does not provision the founder. |
 | You signed up but cannot manage system settings | Standard sign-ups are read-only. If you have lost access to the existing administrator, use the one-time setup-code recovery steps above. |
 
 ## Safe operating reminders
 
 - No Binance API key is needed for public Spot data or paper mode.
-- User registration and database-backed sessions are available, but exchange-connection screens and private Binance account reads are not implemented yet. The schema foundations are in place; do not enter or send API keys until the in-app connection flow is available.
+- Binance API credentials are used only for server-side read-only validation and encrypted storage; no Binance order or withdrawal API is enabled. Never paste exchange keys into chat or public logs.
+- Personal strategies, backtests, a private paper portfolio, MT5 self-service bridge provisioning and broader admin user/subscription management are not complete. Do not treat shared simulations as private accounts.
 - Never enable Binance trading permissions for this application.
 - Never put database or operator credentials into browser code or public client variables.
 - Do not infer strategy profitability from a single backtest or a short live observation period.

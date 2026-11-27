@@ -1,0 +1,3 @@
+ALTER TABLE "subscriptions" ADD COLUMN "pending_plan_id" text;--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD COLUMN "pending_plan_effective_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_pending_plan_id_subscription_plans_id_fk" FOREIGN KEY ("pending_plan_id") REFERENCES "public"."subscription_plans"("id") ON DELETE no action ON UPDATE no action;

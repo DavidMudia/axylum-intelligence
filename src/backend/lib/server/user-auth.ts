@@ -1,7 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@backend/db";
-import { systemState, userSessions, users } from "@backend/db/schema";
+import { subscriptionPlans, subscriptions, systemState, userSessions, users } from "@backend/db/schema";
 import { isSameOriginRequest } from "./request-origin";
 export { isSameOriginRequest } from "./request-origin";
 
@@ -182,12 +182,11 @@ export async function getSignupStatus(): Promise<{
     .where(eq(systemState.key, "auth_admin_bootstrap_consumed"))
     .limit(1);
   const bootstrapSecret = process.env.AUTH_BOOTSTRAP_ADMIN_SECRET;
-  const bootstrapAvailable = !operatorCredentialsConfigured() && !bootstrapUsed && bootstrapSecretConfigured(bootstrapSecret);
-  const bootstrapRequired = !admin && !operatorCredentialsConfigured() && isProduction();
+  const bootstrapAvailable = !admin && !operatorCredentialsConfigured() && !bootstrapUsed && bootstrapSecretConfigured(bootstrapSecret);
   return {
     signupAvailable: true,
-    bootstrapRequired,
-    bootstrapConfigured: !bootstrapRequired || bootstrapAvailable,
+    bootstrapRequired: false,
+    bootstrapConfigured: true,
     bootstrapAvailable,
   };
 }
@@ -258,29 +257,26 @@ export async function registerUser(
         .where(eq(systemState.key, "auth_admin_bootstrap_consumed"))
         .limit(1);
       const expected = process.env.AUTH_BOOTSTRAP_ADMIN_SECRET;
-      const bootstrapAvailable = !operatorCredentialsConfigured() && !bootstrapUsed && bootstrapSecretConfigured(expected);
+      const bootstrapAvailable = !admin && !operatorCredentialsConfigured() && !bootstrapUsed && bootstrapSecretConfigured(expected);
       const submittedBootstrapSecret = typeof body.bootstrapSecret === "string" ? body.bootstrapSecret : "";
       const bootstrapRequested = submittedBootstrapSecret.length > 0;
       if (bootstrapRequested && (!bootstrapAvailable || !secureEqual(submittedBootstrapSecret, expected ?? ""))) {
         throw new AuthFailure(403, "The administrator setup code is invalid or has already been used.", "admin_bootstrap_invalid");
       }
-      let role = "user";
-      if (!admin && !operatorCredentialsConfigured()) {
-        if (isProduction()) {
-          if (!bootstrapSecretConfigured(expected)) {
-            throw new AuthFailure(503, "Configure AUTH_BOOTSTRAP_ADMIN_SECRET before creating the first production account.", "admin_bootstrap_not_configured");
-          }
-          if (!bootstrapRequested) {
-            throw new AuthFailure(403, "The first production account requires the administrator setup code.", "admin_bootstrap_required");
-          }
-        }
-        role = "admin";
-      }
-      if (bootstrapRequested) role = "admin";
+      const role = bootstrapRequested ? "admin" : "user";
       const [user] = await tx.insert(users).values({ email, passwordHash, role }).returning({
         id: users.id,
         email: users.email,
         role: users.role,
+      });
+      const [freePlan] = await tx.select({ id: subscriptionPlans.id }).from(subscriptionPlans)
+        .where(eq(subscriptionPlans.id, "free")).limit(1);
+      if (!freePlan) throw new Error("Free subscription plan is missing; apply the subscription migration before enabling signup.");
+      await tx.insert(subscriptions).values({
+        userId: user.id,
+        planId: freePlan.id,
+        status: "active",
+        source: "free",
       });
       if (bootstrapRequested) {
         await tx.insert(systemState).values({

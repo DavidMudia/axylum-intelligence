@@ -1,4 +1,5 @@
 import { authenticateMt5BridgeRequest } from "@backend/mt5/bridge-auth";
+import { featureDenied, resolveEntitlement } from "@backend/lib/server/entitlements";
 import { readMt5JsonBody } from "@backend/mt5/http";
 import { Mt5AccountNotFoundError, Mt5InstrumentNotFoundError, ingestMt5MarketData } from "@backend/mt5/service";
 import { Mt5PayloadError, parseMt5MarketDataBatch } from "@backend/mt5/validation";
@@ -13,6 +14,8 @@ export async function POST(request: Request) {
     if (!parsed.ok) return parsed.response;
     const bridge = await authenticateMt5BridgeRequest(request, parsed.rawBody);
     if (!bridge) return Response.json({ error: "Bridge authentication failed" }, { status: 401 });
+    const denied = featureDenied(await resolveEntitlement(bridge.ownerUserId), "mt5_demo");
+    if (denied) return denied;
 
     try {
       const batch = parseMt5MarketDataBatch(parsed.value);
