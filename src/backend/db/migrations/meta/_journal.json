@@ -92,6 +92,20 @@
       "when": 1795755637388,
       "tag": "0012_sparkling_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795766581837,
+      "tag": "0013_daily_the_professor",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795767300000,
+      "tag": "0014_scoped_paper_orders",
+      "breakpoints": true
     }
   ]
 }

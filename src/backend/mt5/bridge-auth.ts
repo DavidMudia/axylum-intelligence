@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@backend/db";
 import { mt5Bridges } from "@backend/db/schema";
@@ -9,6 +9,10 @@ export type AuthenticatedMt5Bridge = {
   id: string;
   ownerUserId: string;
 };
+
+export function createMt5BridgeToken(): string {
+  return randomBytes(32).toString("hex");
+}
 
 export function hashMt5BridgeToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");

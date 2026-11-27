@@ -1,41 +1,46 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@backend/db";
 import { engineHealth, paperAccounts } from "@backend/db/schema";
-import { audit, getValue, setValue } from "@backend/lib/server/state";
-import { getPaperPortfolio, getRecentDecisions, getRiskConfig, PAPER_ACCOUNT_ID } from "@backend/intelligence/service";
+import { audit, setValue } from "@backend/lib/server/state";
+import { getPaperPortfolio, getRecentDecisions, getRiskConfig } from "@backend/intelligence/service";
 
 export const dynamic = "force-dynamic";
 const states = new Set(["stopped", "running", "paused"]);
 
-export async function GET() {
+export async function GET(ownerUserId: string) {
   const [state, portfolio, decisions, health] = await Promise.all([
-    getValue("paper_trading_state", "stopped"),
-    getPaperPortfolio(),
-    getRecentDecisions(50),
+    db.select({ sessionStatus: paperAccounts.sessionStatus }).from(paperAccounts)
+      .where(eq(paperAccounts.ownerUserId, ownerUserId)).limit(1),
+    getPaperPortfolio(ownerUserId),
+    getRecentDecisions(ownerUserId, 50),
     db.select().from(engineHealth).where(eq(engineHealth.engine, "paper-trading")).orderBy(desc(engineHealth.updatedAt)).limit(1),
   ]);
-  return Response.json({ state, portfolio, decisions, engine: health[0] ?? null });
+  return Response.json({ state: state[0]?.sessionStatus ?? "stopped", portfolio, decisions, engine: health[0] ?? null });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request, ownerUserId: string) {
   let body: { action?: string };
   try {
     body = await request.json() as { action?: string };
   } catch {
     return Response.json({ error: "Request body must be valid JSON" }, { status: 400 });
   }
-  const current = await getValue("paper_trading_state", "stopped");
+  const [account] = await db.select().from(paperAccounts)
+    .where(eq(paperAccounts.ownerUserId, ownerUserId)).limit(1);
+  if (!account) return Response.json({ error: "Paper account is missing" }, { status: 404 });
+  const current = account.sessionStatus;
   if (body.action === "emergency_halt") {
-    await db.update(paperAccounts).set({ halted: true, updatedAt: new Date() }).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID));
-    await audit("operator", "paper_trading.emergency_halt", "Emergency halt enabled; new entries are blocked and protective exits remain allowed.", "critical");
+    await db.update(paperAccounts).set({ halted: true, updatedAt: new Date() }).where(and(
+      eq(paperAccounts.id, account.id),
+      eq(paperAccounts.ownerUserId, ownerUserId),
+    ));
+    await audit(ownerUserId, "paper_trading.emergency_halt", "Emergency halt enabled; new entries are blocked and protective exits remain allowed.", "critical");
     return Response.json({ halted: true });
   }
   if (body.action === "clear_halt") {
     if (current !== "stopped") return Response.json({ error: "Stop paper trading before clearing an emergency halt" }, { status: 409 });
-    const [account] = await db.select().from(paperAccounts).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID)).limit(1);
-    if (!account) return Response.json({ error: "Paper account is missing" }, { status: 404 });
-    const risk = await getRiskConfig();
-    const portfolio = await getPaperPortfolio();
+    const risk = await getRiskConfig(ownerUserId);
+    const portfolio = await getPaperPortfolio(ownerUserId);
     const dailyLoss = Number(account.dayStartEquity) > 0
       ? (Number(account.dayStartEquity) - portfolio.summary.equity) / Number(account.dayStartEquity) * 100
       : 100;
@@ -45,8 +50,11 @@ export async function POST(request: Request) {
     if (dailyLoss >= risk.maxDailyLossPct || drawdown >= risk.maxDrawdownPct) {
       return Response.json({ error: "Risk limits are still breached; halt cannot be cleared yet." }, { status: 409 });
     }
-    await db.update(paperAccounts).set({ halted: false, updatedAt: new Date() }).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID));
-    await audit("operator", "paper_trading.halt_cleared", "Emergency halt cleared after risk-limit revalidation.");
+    await db.update(paperAccounts).set({ halted: false, updatedAt: new Date() }).where(and(
+      eq(paperAccounts.id, account.id),
+      eq(paperAccounts.ownerUserId, ownerUserId),
+    ));
+    await audit(ownerUserId, "paper_trading.halt_cleared", "Emergency halt cleared after risk-limit revalidation.");
     return Response.json({ halted: false });
   }
   const transitions: Record<string, string> = {
@@ -63,7 +71,11 @@ export async function POST(request: Request) {
   if (body.action === "resume" && current !== "paused") {
     return Response.json({ error: `Cannot resume while paper trading is ${current}` }, { status: 409 });
   }
-  await setValue("paper_trading_state", next);
-  await audit("operator", `paper_trading.${body.action}`, `Paper trading state changed from ${current} to ${next}.`);
-  return Response.json({ state: next, message: "State persisted; the separate paper-trading worker will apply it on its next cycle." });
+  await db.update(paperAccounts).set({ sessionStatus: next, updatedAt: new Date() }).where(and(
+    eq(paperAccounts.id, account.id),
+    eq(paperAccounts.ownerUserId, ownerUserId),
+  ));
+  if (next === "running") await setValue("paper_trading_state", "running");
+  await audit(ownerUserId, `paper_trading.${body.action}`, `Paper trading session changed from ${current} to ${next}.`);
+  return Response.json({ state: next, message: "Your paper session state is saved; the shared worker will apply it on its next cycle." });
 }

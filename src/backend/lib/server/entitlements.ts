@@ -13,7 +13,17 @@ export type Entitlement = {
   periodEndsAt: Date | null;
 };
 
-function isCurrent(subscription: {
+export function paperTradingSessionDenialReason(
+  userStatus: string,
+  entitlement: Entitlement,
+): "user_not_active" | "subscription_unavailable" | "paper_trading_not_included" | null {
+  if (userStatus !== "active") return "user_not_active";
+  if (entitlement.status === "unavailable") return "subscription_unavailable";
+  if (entitlement.features.paper_trading !== true) return "paper_trading_not_included";
+  return null;
+}
+
+export function isSubscriptionAccessCurrent(subscription: {
   status: string;
   currentPeriodEnd: Date | null;
   trialEndsAt: Date | null;
@@ -59,7 +69,7 @@ async function loadEntitlement(userId: string, now: Date): Promise<Entitlement> 
   }).from(subscriptions).innerJoin(subscriptionPlans, eq(subscriptions.planId, subscriptionPlans.id))
     .where(eq(subscriptions.userId, userId)).limit(1);
 
-  if (current && isCurrent(current, now)) {
+  if (current && isSubscriptionAccessCurrent(current, now)) {
     return {
       planId: current.planId,
       planName: current.planName,

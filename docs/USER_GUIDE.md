@@ -49,7 +49,7 @@ Open **Knowledge Graph** from the sidebar to explore and query example entities 
 
 ### Strategy Lab
 
-The existing strategy configuration and historical backtest APIs operate on the legacy shared system engine and are restricted to administrator accounts. They are not yet user-owned strategy workspaces and are not available as a personal Free/Starter subscription feature.
+Strategies, configurations and backtest runs belong to the signed-in user. Strategy editing and backtest limits depend on the user's subscription; Free access has limited backtests, while paid plans include expanded strategy and analysis features. A strategy or backtest created by one account is not visible to another account.
 
 The initial catalog contains:
 
@@ -64,7 +64,7 @@ Backtests are hypothetical, depend on the execution assumptions and do not guara
 
 ### Trading
 
-The current paper portfolio is a shared system simulation in USDT, not a private per-user portfolio. It is not exposed to regular user accounts while data isolation is incomplete. When available to an administrator, it displays cash, equity, realized/unrealized P&L, exposure, fees/slippage, positions, recent orders and decisions.
+Each signed-in user has a separate paper portfolio in USDT. The shared paper worker evaluates each eligible user's active strategies against that user's own risk settings, account, positions and orders. Portfolio and decision history are scoped to the signed-in account; the worker does not process suspended users or accounts without paper-trading entitlement.
 
 1. In Strategy Lab, review the rules and activate only the strategy you intend to test.
 2. Review and save the risk limits. Defaults are conservative paper-only values: `0.5%` maximum equity risk per entry, `2%` daily loss, `10%` drawdown, `10%` position size, one concurrent position and at least `2:1` reward/risk.
@@ -82,11 +82,11 @@ Application resource data is for the web process/container; use Docker/VPS monit
 
 ### Billing
 
-Open **Billing** to compare Free, Starter and Professional access, start a one-time seven-day Starter or Professional trial, begin a Paystack checkout, manage Paystack renewal, and inspect verified payment history. Checkout completion in the browser is not sufficient to activate access; Axylum checks the transaction with Paystack or processes a signed webhook. Complimentary Professional access is shown without a renewal or expiration date.
+Open **Billing** to compare Free, Starter and Professional access, start a one-time seven-day Starter or Professional trial, end a trial early, manage configured Paystack renewal, and inspect verified payment history. Paystack checkout is currently unavailable until a Paystack account and server-side credentials are configured; the page disables checkout and trial actions do not charge or create payment records. Once enabled, checkout completion in the browser is not sufficient to activate access: Axylum must verify the transaction with Paystack or process a signed webhook. Complimentary Professional access is shown without a renewal or expiration date. Paid plan changes remain unavailable until Paystack is configured.
 
 ### Accounts
 
-Open **Accounts** to connect a Binance API key after the server validates it with Binance. Only read-only keys are accepted; keys reporting trading or withdrawal permissions are rejected. The backend encrypts credentials and only returns connection status/labels. Disconnecting deletes the saved credentials. MT5 accounts shown here are user-scoped and demo-only, but bridge provisioning is still an out-of-band operator task.
+Open **Accounts** to connect a Binance API key after the server validates it with Binance. Only read-only keys are accepted; keys reporting trading or withdrawal permissions are rejected. The backend encrypts credentials and only returns connection status/labels. Disconnecting deletes the saved credentials. Professional users can register an MT5 Windows bridge, copy its one-time token configuration to the trusted bridge host, view their bridge/account health, rotate the token, or disconnect while retaining account history. MT5 login passwords are not stored, and order execution remains demo-only and disabled unless the server explicitly enables it.
 
 ## Common states and fixes
 
@@ -98,15 +98,15 @@ Open **Accounts** to connect a Binance API key after the server validates it wit
 | No order after starting | The strategy may correctly be holding; review Intelligence decisions and active strategy status. |
 | Rejected paper order | Read its recorded risk details; adjust valid settings only if appropriate. Limits are intentionally enforced server-side. |
 | Collector reconnecting / unhealthy book sequence | Check DNS/network access to Binance and worker logs; the collector retries and resynchronizes its order-book snapshot. |
-| Sign-in or sign-up reports a database error | Apply migrations and check PostgreSQL availability. |
+| Sign-in or sign-up reports a database error | Check PostgreSQL availability and confirm the environment has all required migrations applied in order. |
 | You need an administrator account | A standard sign-up works without a setup code and receives Free access. An operator can optionally configure `AUTH_BOOTSTRAP_ADMIN_SECRET` to create a one-time administrator; this does not provision the founder. |
-| You signed up but cannot manage system settings | Standard sign-ups are read-only. If you have lost access to the existing administrator, use the one-time setup-code recovery steps above. |
+| You cannot open System or Security | These operational controls are administrator-only. Standard users can manage personal trading, billing and integrations from their workspace. |
 
 ## Safe operating reminders
 
 - No Binance API key is needed for public Spot data or paper mode.
 - Binance API credentials are used only for server-side read-only validation and encrypted storage; no Binance order or withdrawal API is enabled. Never paste exchange keys into chat or public logs.
-- Personal strategies, backtests, a private paper portfolio, MT5 self-service bridge provisioning and broader admin user/subscription management are not complete. Do not treat shared simulations as private accounts.
+- Strategies, backtests, paper accounts and integration records are scoped to signed-in users in the application code. The configured staging and production databases have migrations 0013–0014 applied; any other environment must apply the required migrations before using these workflows.
 - Never enable Binance trading permissions for this application.
 - Never put database or operator credentials into browser code or public client variables.
 - Do not infer strategy profitability from a single backtest or a short live observation period.

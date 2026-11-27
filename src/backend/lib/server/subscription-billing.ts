@@ -2,18 +2,9 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PaystackTransaction } from "./paystack";
 import { db } from "@backend/db";
 import { payments, revenueLedger, subscriptionPlans, subscriptions, users } from "@backend/db/schema";
+import { addBillingMonth } from "./subscription-lifecycle";
 
 type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-function addOneMonth(date: Date): Date {
-  const next = new Date(date);
-  const day = next.getUTCDate();
-  next.setUTCDate(1);
-  next.setUTCMonth(next.getUTCMonth() + 1);
-  const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
-  next.setUTCDate(Math.min(day, lastDay));
-  return next;
-}
 
 export async function activateVerifiedPayment(
   tx: DatabaseTransaction,
@@ -56,7 +47,7 @@ export async function activateVerifiedPayment(
   const [existing] = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId)).for("update").limit(1);
   const periodStart = existing?.currentPeriodEnd && existing.currentPeriodEnd > paidAt
     ? existing.currentPeriodEnd : paidAt;
-  const periodEnd = addOneMonth(periodStart);
+  const periodEnd = addBillingMonth(periodStart);
   const receiptBaseUrl = process.env.APP_BASE_URL;
   const receiptUrl = receiptBaseUrl
     ? new URL(`/billing/receipt?reference=${encodeURIComponent(reference)}`, receiptBaseUrl).toString()

@@ -3,11 +3,13 @@ import {
   boolean,
   check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -26,11 +28,13 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull().default("user"),
+  status: text("status").notNull().default("active"),
   trialUsedAt: marketTimestamp("trial_used_at"),
   createdAt: marketTimestamp("created_at").notNull().defaultNow(),
   updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   check("users_role_check", sql`${table.role} in ('owner', 'admin', 'user')`),
+  check("users_status_check", sql`${table.status} in ('active', 'suspended')`),
   uniqueIndex("users_email_uidx").on(table.email),
 ]);
 
@@ -236,7 +240,7 @@ export const exchangeConnections = pgTable(
   ],
 );
 
-/** A Windows MT5 bridge is provisioned out-of-band; only its token digest is stored. */
+/** User-owned Windows bridge identities store only token digests, never cleartext tokens. */
 export const mt5Bridges = pgTable(
   "mt5_bridges",
   {
@@ -540,16 +544,19 @@ export const auditLog = pgTable("audit_log", {
 /** Saved strategies from the Strategy Lab. */
 export const strategies = pgTable("strategies", {
   id: serial("id").primaryKey(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   rules: jsonb("rules").notNull(),
   risk: jsonb("risk").notNull(),
   result: jsonb("result"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [index("strategies_owner_created_idx").on(table.ownerUserId, table.createdAt)]);
 
 /** Simulated orders. Every order passes through the independent risk engine. */
 export const paperOrders = pgTable("paper_orders", {
   id: serial("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   clientOrderId: text("client_order_id"),
   symbol: text("symbol").notNull(),
   side: text("side").notNull(),
@@ -570,7 +577,16 @@ export const paperOrders = pgTable("paper_orders", {
   riskDetails: jsonb("risk_details").$type<Array<{ name: string; passed: boolean; detail: string }>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   executedAt: marketTimestamp("executed_at"),
-}, (table) => [uniqueIndex("paper_orders_client_order_id_uidx").on(table.clientOrderId)]);
+}, (table) => [
+  foreignKey({
+    name: "paper_orders_account_owner_fk",
+    columns: [table.accountId, table.ownerUserId],
+    foreignColumns: [paperAccounts.id, paperAccounts.ownerUserId],
+  }).onDelete("cascade"),
+  uniqueIndex("paper_orders_account_client_order_id_uidx").on(table.accountId, table.clientOrderId),
+  index("paper_orders_owner_created_idx").on(table.ownerUserId, table.createdAt),
+  index("paper_orders_account_created_idx").on(table.accountId, table.createdAt),
+]);
 
 export const marketCandles = pgTable(
   "market_candles",
@@ -710,6 +726,7 @@ export const tradingDecisions = pgTable(
   "trading_decisions",
   {
     id: serial("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     strategySlug: text("strategy_slug").notNull(),
     strategyVersion: integer("strategy_version").notNull(),
     symbol: text("symbol").notNull(),
@@ -731,18 +748,21 @@ export const tradingDecisions = pgTable(
     createdAt: marketTimestamp("created_at").notNull(),
   },
   (table) => [
-    uniqueIndex("trading_decisions_strategy_symbol_interval_candle_uidx").on(
+    uniqueIndex("trading_decisions_owner_strategy_symbol_interval_candle_uidx").on(
+      table.ownerUserId,
       table.strategySlug,
       table.symbol,
       table.interval,
       table.candleOpenTime,
     ),
+    index("trading_decisions_owner_created_idx").on(table.ownerUserId, table.createdAt),
     index("trading_decisions_created_at_idx").on(table.createdAt),
   ],
 );
 
 export const paperAccounts = pgTable("paper_accounts", {
   id: text("id").primaryKey(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   currency: text("currency").notNull().default("USDT"),
   startingBalance: numeric("starting_balance", { precision: 30, scale: 12 }).notNull(),
   cashBalance: numeric("cash_balance", { precision: 30, scale: 12 }).notNull(),
@@ -751,11 +771,17 @@ export const paperAccounts = pgTable("paper_accounts", {
   dayStartEquity: numeric("day_start_equity", { precision: 30, scale: 12 }).notNull(),
   dayStartDate: text("day_start_date").notNull(),
   halted: boolean("halted").notNull().default(false),
+  sessionStatus: text("session_status").notNull().default("stopped"),
   updatedAt: marketTimestamp("updated_at").notNull(),
-});
+}, (table) => [
+  check("paper_accounts_session_status_check", sql`${table.sessionStatus} in ('stopped', 'running', 'paused')`),
+  uniqueIndex("paper_accounts_owner_uidx").on(table.ownerUserId),
+  uniqueIndex("paper_accounts_id_owner_uidx").on(table.id, table.ownerUserId),
+]);
 
 export const paperPositions = pgTable("paper_positions", {
-  symbol: text("symbol").primaryKey(),
+  accountId: text("account_id").notNull().references(() => paperAccounts.id, { onDelete: "cascade" }),
+  symbol: text("symbol").notNull(),
   quantity: numeric("quantity", { precision: 36, scale: 18 }).notNull(),
   averageEntryPrice: price("average_entry_price").notNull(),
   markPrice: price("mark_price").notNull(),
@@ -764,12 +790,16 @@ export const paperPositions = pgTable("paper_positions", {
   realizedPnl: numeric("realized_pnl", { precision: 30, scale: 12 }).notNull().default("0"),
   openedAt: marketTimestamp("opened_at").notNull(),
   updatedAt: marketTimestamp("updated_at").notNull(),
-});
+}, (table) => [
+  primaryKey({ name: "paper_positions_pkey", columns: [table.accountId, table.symbol] }),
+  index("paper_positions_account_opened_idx").on(table.accountId, table.openedAt),
+]);
 
 export const backtestRuns = pgTable(
   "backtest_runs",
   {
     id: serial("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     strategySlug: text("strategy_slug").notNull(),
     strategyVersion: integer("strategy_version").notNull(),
     symbol: text("symbol").notNull(),
@@ -781,7 +811,10 @@ export const backtestRuns = pgTable(
     trades: jsonb("trades").$type<Array<Record<string, unknown>>>().notNull(),
     createdAt: marketTimestamp("created_at").notNull(),
   },
-  (table) => [index("backtest_runs_strategy_created_idx").on(table.strategySlug, table.createdAt)],
+  (table) => [
+    index("backtest_runs_owner_created_idx").on(table.ownerUserId, table.createdAt),
+    index("backtest_runs_strategy_created_idx").on(table.strategySlug, table.createdAt),
+  ],
 );
 
 export const engineHealth = pgTable("engine_health", {
@@ -808,6 +841,7 @@ export const engineLogs = pgTable(
 
 export const riskConfigurations = pgTable("risk_configurations", {
   id: text("id").primaryKey(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   maxRiskPerTradePct: doublePrecision("max_risk_per_trade_pct").notNull(),
   maxDailyLossPct: doublePrecision("max_daily_loss_pct").notNull(),
   maxDrawdownPct: doublePrecision("max_drawdown_pct").notNull(),
@@ -819,4 +853,24 @@ export const riskConfigurations = pgTable("risk_configurations", {
   slippageRate: doublePrecision("slippage_rate").notNull(),
   startingBalance: numeric("starting_balance", { precision: 30, scale: 12 }).notNull(),
   updatedAt: marketTimestamp("updated_at").notNull(),
-});
+}, (table) => [uniqueIndex("risk_configurations_owner_uidx").on(table.ownerUserId)]);
+
+export const userStrategies = pgTable(
+  "user_strategies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    version: integer("version").notNull().default(1),
+    active: boolean("active").notNull().default(false),
+    rules: jsonb("rules").$type<Record<string, unknown>>().notNull(),
+    createdAt: marketTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: marketTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("user_strategies_user_slug_uidx").on(table.userId, table.slug),
+    index("user_strategies_user_active_idx").on(table.userId, table.active),
+  ],
+);

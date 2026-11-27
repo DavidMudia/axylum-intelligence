@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, pool } from "@backend/db";
 import { acquireWorkerLock } from "@backend/lib/server/worker-lock";
 import {
@@ -12,13 +12,15 @@ import {
   riskConfigurations,
   systemState,
   tradingDecisions,
-  tradingStrategies,
+  users,
+  userStrategies,
 } from "@backend/db/schema";
+import { paperTradingSessionDenialReason, resolveEntitlement } from "@backend/lib/server/entitlements";
 import { getCandles, getLatestOrderBookSnapshot, getRecentTrades } from "@backend/market-data/store";
 import { analyzeMarket } from "./indicators";
-import { ensureTradingDefaults, PAPER_ACCOUNT_ID, RISK_CONFIG_ID } from "./service";
+import { ensureTradingDefaults } from "./service";
 import { validatePaperOrder, type RiskCheck, type RiskConfig } from "./risk";
-import { decide, type StrategyDefinition } from "./strategies";
+import { decide } from "./strategies";
 
 const ENGINE = "paper-trading";
 const SYMBOL = "BTCUSDT";
@@ -80,14 +82,26 @@ async function persistAnalysis(analysis: ReturnType<typeof analyzeMarket>) {
 }
 
 async function processStrategy(
-  strategy: StrategyDefinition,
+  strategy: typeof userStrategies.$inferSelect,
+  account: typeof paperAccounts.$inferSelect,
   analysis: ReturnType<typeof analyzeMarket>,
   previous: ReturnType<typeof analyzeMarket>["indicators"] | null,
   execution: { time: Date; open: number; high: number; low: number; close: number },
 ) {
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(83710421)`);
+    const [user] = await tx.select({ status: users.status }).from(users)
+      .where(eq(users.id, account.ownerUserId)).for("update").limit(1);
+    if (!user || user.status !== "active") return;
+    const [lockedAccount] = await tx.select().from(paperAccounts).where(and(
+      eq(paperAccounts.id, account.id),
+      eq(paperAccounts.ownerUserId, account.ownerUserId),
+      eq(paperAccounts.sessionStatus, "running"),
+    )).for("update").limit(1);
+    if (!lockedAccount) return;
+
     const inserted = await tx.insert(tradingDecisions).values({
+      ownerUserId: account.ownerUserId,
       strategySlug: strategy.slug,
       strategyVersion: strategy.version,
       symbol: SYMBOL,
@@ -109,6 +123,7 @@ async function processStrategy(
       createdAt: new Date(),
     }).onConflictDoNothing({
       target: [
+        tradingDecisions.ownerUserId,
         tradingDecisions.strategySlug,
         tradingDecisions.symbol,
         tradingDecisions.interval,
@@ -118,35 +133,38 @@ async function processStrategy(
     const decisionId = inserted[0]?.id;
     if (!decisionId) return;
 
-    const [account] = await tx.select().from(paperAccounts).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID)).for("update").limit(1);
-    if (!account) throw new Error("Paper account is missing");
-    const [riskRow] = await tx.select().from(riskConfigurations).where(eq(riskConfigurations.id, RISK_CONFIG_ID)).limit(1);
+    const [riskRow] = await tx.select().from(riskConfigurations)
+      .where(eq(riskConfigurations.ownerUserId, account.ownerUserId)).limit(1);
     if (!riskRow) throw new Error("Paper risk configuration is missing");
-    const positions = await tx.select().from(paperPositions).for("update");
+    const positions = await tx.select().from(paperPositions)
+      .where(eq(paperPositions.accountId, account.id)).for("update");
     const position = positions.find((row) => row.symbol === SYMBOL);
     const accountRisk = configFromRow(riskRow);
     const today = new Date().toISOString().slice(0, 10);
-    const cash = Number(account.cashBalance);
+    const cash = Number(lockedAccount.cashBalance);
     const quantity = position ? Number(position.quantity) : 0;
     const markPrice = position ? execution.close : 0;
     if (position) {
       await tx.update(paperPositions).set({ markPrice: String(markPrice), updatedAt: new Date() })
-        .where(eq(paperPositions.symbol, SYMBOL));
+        .where(and(eq(paperPositions.accountId, account.id), eq(paperPositions.symbol, SYMBOL)));
     }
     const equity = cash + quantity * markPrice;
-    const peak = Math.max(Number(account.peakEquity), equity);
-    const dayStartEquity = account.dayStartDate === today ? Number(account.dayStartEquity) : equity;
+    const peak = Math.max(Number(lockedAccount.peakEquity), equity);
+    const dayStartEquity = lockedAccount.dayStartDate === today ? Number(lockedAccount.dayStartEquity) : equity;
     const dailyLossPct = dayStartEquity > 0 ? (dayStartEquity - equity) / dayStartEquity * 100 : 100;
     const drawdownPct = peak > 0 ? (peak - equity) / peak * 100 : 100;
     const autoHalt = dailyLossPct >= accountRisk.maxDailyLossPct || drawdownPct >= accountRisk.maxDrawdownPct;
-    const halted = account.halted || autoHalt;
+    const halted = lockedAccount.halted || autoHalt;
     await tx.update(paperAccounts).set({
       peakEquity: String(peak),
       dayStartEquity: String(dayStartEquity),
       dayStartDate: today,
       halted,
       updatedAt: new Date(),
-    }).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID));
+    }).where(and(
+      eq(paperAccounts.id, account.id),
+      eq(paperAccounts.ownerUserId, account.ownerUserId),
+    ));
 
     const signal = decide(strategy, analysis, previous);
     const holding = Boolean(position && quantity > 0);
@@ -240,10 +258,14 @@ async function processStrategy(
       slippage = orderQuantity * Math.abs(orderPrice - price);
       await tx.update(paperAccounts).set({
         cashBalance: String(cash - orderQuantity * orderPrice - fee),
-        realizedPnl: String(Number(account.realizedPnl) - fee),
+        realizedPnl: String(Number(lockedAccount.realizedPnl) - fee),
         updatedAt: new Date(),
-      }).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID));
+      }).where(and(
+        eq(paperAccounts.id, account.id),
+        eq(paperAccounts.ownerUserId, account.ownerUserId),
+      ));
       await tx.insert(paperPositions).values({
+        accountId: account.id,
         symbol: SYMBOL,
         quantity: String(orderQuantity),
         averageEntryPrice: String(orderPrice),
@@ -261,14 +283,22 @@ async function processStrategy(
       realizedPnl = (orderPrice - Number(position.averageEntryPrice)) * orderQuantity - fee;
       await tx.update(paperAccounts).set({
         cashBalance: String(cash + orderQuantity * orderPrice - fee),
-        realizedPnl: String(Number(account.realizedPnl) + realizedPnl),
+        realizedPnl: String(Number(lockedAccount.realizedPnl) + realizedPnl),
         updatedAt: new Date(),
-      }).where(eq(paperAccounts.id, PAPER_ACCOUNT_ID));
-      await tx.delete(paperPositions).where(eq(paperPositions.symbol, SYMBOL));
+      }).where(and(
+        eq(paperAccounts.id, account.id),
+        eq(paperAccounts.ownerUserId, account.ownerUserId),
+      ));
+      await tx.delete(paperPositions).where(and(
+        eq(paperPositions.accountId, account.id),
+        eq(paperPositions.symbol, SYMBOL),
+      ));
     }
 
     const [order] = await tx.insert(paperOrders).values({
-      clientOrderId: `paper:${strategy.slug}:${analysis.candleOpenTime.getTime()}`,
+      accountId: account.id,
+      ownerUserId: account.ownerUserId,
+      clientOrderId: `paper:${account.ownerUserId}:${strategy.slug}:${analysis.candleOpenTime.getTime()}`,
       symbol: SYMBOL,
       side: action.toLowerCase(),
       orderType: "market",
@@ -303,7 +333,10 @@ async function processStrategy(
       invalidation: finalSignal.invalidation,
       riskChecks: checks,
       orderId,
-    }).where(eq(tradingDecisions.id, decisionId));
+    }).where(and(
+      eq(tradingDecisions.id, decisionId),
+      eq(tradingDecisions.ownerUserId, account.ownerUserId),
+    ));
     await tx.insert(engineLogs).values({
       engine: ENGINE,
       level: accepted ? "info" : "warn",
@@ -345,15 +378,49 @@ async function cycle(): Promise<void> {
     close: Number(latestTrade.price),
   };
   await persistAnalysis(analysis);
-  const active = await db.select().from(tradingStrategies).where(eq(tradingStrategies.active, true)).orderBy(desc(tradingStrategies.slug));
-  for (const strategy of active) {
-    await processStrategy(strategy, analysis, previous, execution);
+  const activeAccounts = await db.select({
+    account: paperAccounts,
+    userStatus: users.status,
+  }).from(paperAccounts).innerJoin(users, eq(users.id, paperAccounts.ownerUserId))
+    .where(eq(paperAccounts.sessionStatus, "running"));
+  const activeSlugs = new Set<string>();
+  for (const { account, userStatus } of activeAccounts) {
+    const denialReason = paperTradingSessionDenialReason(
+      userStatus,
+      await resolveEntitlement(account.ownerUserId),
+    );
+    if (denialReason) {
+      const stopped = await db.update(paperAccounts).set({
+        sessionStatus: "stopped",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(paperAccounts.id, account.id),
+        eq(paperAccounts.ownerUserId, account.ownerUserId),
+        eq(paperAccounts.sessionStatus, "running"),
+      )).returning({ id: paperAccounts.id });
+      if (stopped.length) {
+        await logEvent("warn", "paper_session_stopped_without_access", {
+          ownerUserId: account.ownerUserId,
+          reason: denialReason,
+        });
+      }
+      continue;
+    }
+
+    const active = await db.select().from(userStrategies).where(and(
+      eq(userStrategies.userId, account.ownerUserId),
+      eq(userStrategies.active, true),
+    )).orderBy(desc(userStrategies.slug));
+    for (const strategy of active) {
+      activeSlugs.add(strategy.slug);
+      await processStrategy(strategy, account, analysis, previous, execution);
+    }
   }
   await setEngineHealth("running", null, {
     symbol: SYMBOL,
     interval: INTERVAL,
     lastDecisionCandle: signalRow.openTime.toISOString(),
-    activeStrategies: active.map((strategy) => strategy.slug),
+    activeStrategies: [...activeSlugs],
   });
 }
 

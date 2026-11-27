@@ -2,8 +2,8 @@ import { getPaperPortfolio } from "@backend/intelligence/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  return Response.json(await getPaperPortfolio());
+export async function GET(ownerUserId: string) {
+  return Response.json(await getPaperPortfolio(ownerUserId));
 }
 
 export async function POST(_request: Request) {

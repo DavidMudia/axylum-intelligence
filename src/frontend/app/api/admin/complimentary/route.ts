@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { complimentaryAccountEvents, complimentarySlots, payments, subscriptionPlans, subscriptions, users } from "@backend/db/schema";
-import { authorizePlatformOwner } from "@backend/lib/server/operator-auth";
+import { authorizeAdministrator, authorizePlatformOwner } from "@backend/lib/server/operator-auth";
 import { getSessionUser, isUniqueConstraintViolation, isValidEmail, normalizeEmail } from "@backend/lib/server/user-auth";
 import { db } from "@backend/db";
 import { withDatabaseConfiguration } from "@/lib/with-database-configuration";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   return withDatabaseConfiguration(async () => {
-    const denied = await authorizePlatformOwner(request);
+    const denied = await authorizeAdministrator(request);
     if (denied) return denied;
     const [slots, events, [usersCount], [paidCount], [mrr], [verifiedRevenue]] = await Promise.all([
       db.select({

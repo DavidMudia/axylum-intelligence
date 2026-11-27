@@ -1,17 +1,17 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@backend/db";
 import { riskConfigurations } from "@backend/db/schema";
 import { audit } from "@backend/lib/server/state";
-import { DEFAULT_RISK_CONFIG, getRiskConfig, PAPER_STARTING_BALANCE, RISK_CONFIG_ID } from "@backend/intelligence/service";
+import { DEFAULT_RISK_CONFIG, getRiskConfig, PAPER_STARTING_BALANCE } from "@backend/intelligence/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const config = await getRiskConfig();
+export async function GET(ownerUserId: string) {
+  const config = await getRiskConfig(ownerUserId);
   return Response.json({ config, startingBalance: PAPER_STARTING_BALANCE, mode: "paper_only" });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request, ownerUserId: string) {
   let body: Record<string, unknown>;
   try {
     body = await request.json() as Record<string, unknown>;
@@ -36,7 +36,10 @@ export async function POST(request: Request) {
     return Response.json({ error: `${invalid} must be between ${bounds[invalid][0]} and ${bounds[invalid][1]}` }, { status: 400 });
   }
   const now = new Date();
-  await db.update(riskConfigurations).set({ ...proposed, updatedAt: now }).where(eq(riskConfigurations.id, RISK_CONFIG_ID));
-  await audit("operator", "risk.configuration.updated", "Paper trading risk configuration updated.");
+  const updated = await db.update(riskConfigurations).set({ ...proposed, updatedAt: now }).where(and(
+    eq(riskConfigurations.ownerUserId, ownerUserId),
+  )).returning({ id: riskConfigurations.id });
+  if (!updated.length) return Response.json({ error: "Risk configuration not found" }, { status: 404 });
+  await audit(ownerUserId, "risk.configuration.updated", "Paper trading risk configuration updated.");
   return Response.json({ config: proposed, updatedAt: now });
 }

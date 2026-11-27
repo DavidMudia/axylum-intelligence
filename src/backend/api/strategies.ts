@@ -1,44 +1,55 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@backend/db";
-import { backtestRuns, tradingStrategies } from "@backend/db/schema";
+import { backtestRuns, userStrategies } from "@backend/db/schema";
 import { getCandles } from "@backend/market-data/store";
-import { audit } from "@backend/lib/server/state";
 import { runHistoricalBacktest } from "@backend/intelligence/backtest";
-import { ensureTradingDefaults, getRiskConfig, PAPER_STARTING_BALANCE } from "@backend/intelligence/service";
+import { getRiskConfig, PAPER_STARTING_BALANCE } from "@backend/intelligence/service";
 
 export const dynamic = "force-dynamic";
 const intervals = new Set(["1m", "5m", "15m", "1h", "4h", "1d"]);
 
-export async function GET() {
-  await ensureTradingDefaults();
+export async function GET(ownerUserId: string) {
   const [strategies, runs] = await Promise.all([
-    db.select().from(tradingStrategies).orderBy(desc(tradingStrategies.updatedAt)),
-    db.select().from(backtestRuns).orderBy(desc(backtestRuns.createdAt)).limit(20),
+    db.select({
+      slug: userStrategies.slug,
+      name: userStrategies.name,
+      description: userStrategies.description,
+      version: userStrategies.version,
+      active: userStrategies.active,
+      rules: userStrategies.rules,
+    }).from(userStrategies).where(eq(userStrategies.userId, ownerUserId))
+      .orderBy(desc(userStrategies.updatedAt)),
+    db.select().from(backtestRuns).where(eq(backtestRuns.ownerUserId, ownerUserId))
+      .orderBy(desc(backtestRuns.createdAt)).limit(20),
   ]);
   return Response.json({ strategies, backtests: runs });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request, ownerUserId: string) {
   let body: Record<string, unknown>;
   try {
     body = await request.json() as Record<string, unknown>;
   } catch {
     return Response.json({ error: "Request body must be valid JSON" }, { status: 400 });
   }
-  await ensureTradingDefaults();
 
   if (body.action === "toggle") {
     if (typeof body.slug !== "string" || typeof body.active !== "boolean") {
       return Response.json({ error: "A strategy slug and active boolean are required" }, { status: 400 });
     }
-    const [existing] = await db.select().from(tradingStrategies).where(eq(tradingStrategies.slug, body.slug)).limit(1);
-    if (!existing) return Response.json({ error: "Unknown strategy" }, { status: 404 });
-    const [strategy] = await db.update(tradingStrategies).set({
+    const [existing] = await db.select().from(userStrategies).where(and(
+      eq(userStrategies.userId, ownerUserId),
+      eq(userStrategies.slug, body.slug),
+    )).limit(1);
+    if (!existing) return Response.json({ error: "Strategy not found" }, { status: 404 });
+    const [strategy] = await db.update(userStrategies).set({
       active: body.active,
       version: existing.active === body.active ? existing.version : existing.version + 1,
       updatedAt: new Date(),
-    }).where(eq(tradingStrategies.slug, existing.slug)).returning();
-    await audit("operator", body.active ? "strategy.activated" : "strategy.deactivated", `${strategy.name} v${strategy.version}`);
+    }).where(and(
+      eq(userStrategies.userId, ownerUserId),
+      eq(userStrategies.slug, existing.slug),
+    )).returning();
     return Response.json({ strategy });
   }
 
@@ -46,8 +57,11 @@ export async function POST(request: Request) {
     if (typeof body.slug !== "string" || typeof body.rules !== "object" || body.rules === null || Array.isArray(body.rules)) {
       return Response.json({ error: "A strategy slug and numeric rules object are required" }, { status: 400 });
     }
-    const [existing] = await db.select().from(tradingStrategies).where(eq(tradingStrategies.slug, body.slug)).limit(1);
-    if (!existing) return Response.json({ error: "Unknown strategy" }, { status: 404 });
+    const [existing] = await db.select().from(userStrategies).where(and(
+      eq(userStrategies.userId, ownerUserId),
+      eq(userStrategies.slug, body.slug),
+    )).limit(1);
+    if (!existing) return Response.json({ error: "Strategy not found" }, { status: 404 });
     const permitted = existing.slug === "ema-trend"
       ? { rsiMin: [20, 60], rsiMax: [40, 80], volumeRatioMin: [0.1, 5], stopAtr: [0.5, 4], targetAtr: [1, 8] }
       : { rsiEntry: [10, 40], rsiExit: [55, 90], supportDistancePct: [0.1, 3], stopAtr: [0.5, 4], targetAtr: [1, 8] };
@@ -64,7 +78,7 @@ export async function POST(request: Request) {
     if (Object.keys(submitted).some((key) => !(key in permitted))) {
       return Response.json({ error: "One or more submitted rules are not configurable for this strategy" }, { status: 400 });
     }
-    const configRisk = await getRiskConfig();
+    const configRisk = await getRiskConfig(ownerUserId);
     const minimumEntry = Number(rules.rsiMin ?? 40);
     const maximumEntry = Number(rules.rsiMax ?? 68);
     const oversold = Number(rules.rsiEntry ?? 30);
@@ -76,12 +90,14 @@ export async function POST(request: Request) {
       targetMultiple / stopMultiple < configRisk.minRiskReward) {
       return Response.json({ error: "Entry thresholds must be ordered correctly and target/stop multiples must meet the configured minimum risk/reward." }, { status: 400 });
     }
-    const [strategy] = await db.update(tradingStrategies).set({
+    const [strategy] = await db.update(userStrategies).set({
       rules,
       version: existing.version + 1,
       updatedAt: new Date(),
-    }).where(eq(tradingStrategies.slug, existing.slug)).returning();
-    await audit("operator", "strategy.rules.updated", `${strategy.name} updated to v${strategy.version}`);
+    }).where(and(
+      eq(userStrategies.userId, ownerUserId),
+      eq(userStrategies.slug, existing.slug),
+    )).returning();
     return Response.json({ strategy });
   }
 
@@ -98,39 +114,66 @@ export async function POST(request: Request) {
   if (!Number.isInteger(requestedLimit) || requestedLimit < 250 || requestedLimit > 100_000) {
     return Response.json({ error: "limit must be an integer from 250 to 100000" }, { status: 400 });
   }
-  const [strategy] = await db.select().from(tradingStrategies).where(eq(tradingStrategies.slug, strategySlug)).limit(1);
-  if (!strategy) return Response.json({ error: "Strategy is not configured" }, { status: 404 });
+  const [strategy] = await db.select().from(userStrategies).where(and(
+    eq(userStrategies.userId, ownerUserId),
+    eq(userStrategies.slug, strategySlug),
+  )).limit(1);
+  if (!strategy) return Response.json({ error: "Strategy is not configured for this account" }, { status: 404 });
+
+  const entitlementLimit = Number(body.dailyLimit);
+  if (!Number.isInteger(entitlementLimit) || entitlementLimit < 1) {
+    return Response.json({ error: "Backtesting is not included in the current subscription", code: "backtests_unavailable" }, { status: 402 });
+  }
   const candles = (await getCandles("BTCUSDT", interval, requestedLimit)).filter((candle) => candle.isClosed);
   if (candles.length < 250) {
     return Response.json({ error: `Backtesting requires at least 250 closed candles; found ${candles.length}` }, { status: 422 });
   }
-  const risk = await getRiskConfig();
-  let result;
+  const risk = await getRiskConfig(ownerUserId);
   try {
-    result = runHistoricalBacktest(candles, {
-      strategySlug,
-      symbol: "BTCUSDT",
-      interval,
-      risk,
-      startingEquity: PAPER_STARTING_BALANCE,
-      rules: strategy.rules,
+    const outcome = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(
+        hashtext(${ownerUserId}),
+        hashtext(to_char(now() at time zone 'UTC', 'YYYY-MM-DD'))
+      )`);
+      const [usage] = await tx.select({ count: sql<number>`count(*)::int` }).from(backtestRuns)
+        .where(and(
+          eq(backtestRuns.ownerUserId, ownerUserId),
+          sql`${backtestRuns.createdAt} >= (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')`,
+        ));
+      if ((usage?.count ?? 0) >= entitlementLimit) return { limitReached: true } as const;
+      const result = runHistoricalBacktest(candles, {
+        strategySlug,
+        symbol: "BTCUSDT",
+        interval,
+        risk,
+        startingEquity: PAPER_STARTING_BALANCE,
+        rules: strategy.rules,
+      });
+      const [run] = await tx.insert(backtestRuns).values({
+        ownerUserId,
+        strategySlug,
+        strategyVersion: strategy.version,
+        symbol: "BTCUSDT",
+        interval,
+        fromTime: result.fromTime,
+        toTime: result.toTime,
+        metrics: result.metrics,
+        equityCurve: result.equityCurve,
+        trades: result.trades,
+        createdAt: new Date(),
+      }).returning();
+      return { result, runId: run.id } as const;
     });
+    if ("limitReached" in outcome) {
+      return Response.json({
+        error: `This plan allows ${entitlementLimit} backtests per day. Try again tomorrow or review available plans.`,
+        code: "backtest_daily_limit_reached",
+        limit: entitlementLimit,
+      }, { status: 429 });
+    }
+    return Response.json({ result: { ...outcome.result, runId: outcome.runId, strategyVersion: strategy.version } });
   } catch (error) {
     if (error instanceof RangeError) return Response.json({ error: error.message }, { status: 422 });
     throw error;
   }
-  const [run] = await db.insert(backtestRuns).values({
-    strategySlug,
-    strategyVersion: strategy.version,
-    symbol: "BTCUSDT",
-    interval,
-    fromTime: result.fromTime,
-    toTime: result.toTime,
-    metrics: result.metrics,
-    equityCurve: result.equityCurve,
-    trades: result.trades,
-    createdAt: new Date(),
-  }).returning();
-  await audit("operator", "backtest.completed", `${strategySlug} v${strategy.version}; ${result.metrics.inSample.trades} simulated trades over ${candles.length} closed Binance candles.`);
-  return Response.json({ result: { ...result, runId: run.id, strategyVersion: strategy.version } });
 }

@@ -1,9 +1,9 @@
 import "dotenv/config";
-import { createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { mt5Accounts, mt5Bridges } from "@backend/db/schema";
+import { createMt5BridgeToken, hashMt5BridgeToken } from "./bridge-auth";
 
 async function main(): Promise<void> {
   const [id] = process.argv.slice(2);
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   try {
     const db = drizzle(pool);
     const [bridge] = await db.update(mt5Bridges).set({
-      tokenHash: createHash("sha256").update(randomBytes(32)).digest("hex"),
+      tokenHash: hashMt5BridgeToken(createMt5BridgeToken()),
       status: "offline",
       lastError: "Bridge token revoked",
       updatedAt: new Date(),

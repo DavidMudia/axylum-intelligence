@@ -1,7 +1,9 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@backend/db";
-import { subscriptionPlans, subscriptions, systemState, userSessions, users } from "@backend/db/schema";
+import { paperAccounts, riskConfigurations, subscriptionPlans, subscriptions, systemState, userSessions, userStrategies, users } from "@backend/db/schema";
+import { DEFAULT_RISK_CONFIG } from "@backend/intelligence/risk";
+import { DEFAULT_STRATEGIES } from "@backend/intelligence/strategies";
 import { isSameOriginRequest } from "./request-origin";
 export { isSameOriginRequest } from "./request-origin";
 
@@ -164,7 +166,11 @@ export async function getSessionUser(request: Request): Promise<AuthUser | null>
     .select({ id: users.id, email: users.email, role: users.role })
     .from(userSessions)
     .innerJoin(users, eq(userSessions.userId, users.id))
-    .where(and(eq(userSessions.id, sessionId), gt(userSessions.expiresAt, new Date())))
+    .where(and(
+      eq(userSessions.id, sessionId),
+      gt(userSessions.expiresAt, new Date()),
+      eq(users.status, "active"),
+    ))
     .limit(1);
   return session ?? null;
 }
@@ -175,7 +181,8 @@ export async function getSignupStatus(): Promise<{
   bootstrapConfigured: boolean;
   bootstrapAvailable: boolean;
 }> {
-  const [admin] = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin")).limit(1);
+  const [admin] = await db.select({ id: users.id }).from(users)
+    .where(inArray(users.role, ["admin", "owner"])).limit(1);
   const [bootstrapUsed] = await db
     .select({ key: systemState.key })
     .from(systemState)
@@ -217,6 +224,9 @@ export async function loginUser(
   if (!user || !verifyPassword(body.password, user.passwordHash)) {
     return Response.json({ error: "Invalid email or password" }, { status: 401 });
   }
+  if (user.status !== "active") {
+    return Response.json({ error: "This account is suspended. Contact the platform administrator." }, { status: 403 });
+  }
   clearRateLimit(key);
   return establishSession(user.id, { email: user.email, role: user.role });
 }
@@ -250,7 +260,8 @@ export async function registerUser(
   try {
     [created] = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(${BOOTSTRAP_LOCK_ID})`);
-      const [admin] = await tx.select({ id: users.id }).from(users).where(eq(users.role, "admin")).limit(1);
+      const [admin] = await tx.select({ id: users.id }).from(users)
+        .where(inArray(users.role, ["admin", "owner"])).limit(1);
       const [bootstrapUsed] = await tx
         .select({ key: systemState.key })
         .from(systemState)
@@ -278,6 +289,42 @@ export async function registerUser(
         status: "active",
         source: "free",
       });
+      const accountId = `paper-${user.id}`;
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      const startingBalance = "100000";
+      await tx.insert(paperAccounts).values({
+        id: accountId,
+        ownerUserId: user.id,
+        currency: "USDT",
+        startingBalance,
+        cashBalance: startingBalance,
+        realizedPnl: "0",
+        peakEquity: startingBalance,
+        dayStartEquity: startingBalance,
+        dayStartDate: today,
+        halted: false,
+        sessionStatus: "stopped",
+        updatedAt: now,
+      });
+      await tx.insert(riskConfigurations).values({
+        id: `paper-risk-${user.id}`,
+        ownerUserId: user.id,
+        ...DEFAULT_RISK_CONFIG,
+        startingBalance,
+        updatedAt: now,
+      });
+      await tx.insert(userStrategies).values(DEFAULT_STRATEGIES.map((strategy) => ({
+        userId: user.id,
+        slug: strategy.slug,
+        name: strategy.name,
+        description: strategy.description,
+        version: strategy.version,
+        active: strategy.active,
+        rules: strategy.rules,
+        createdAt: now,
+        updatedAt: now,
+      })));
       if (bootstrapRequested) {
         await tx.insert(systemState).values({
           key: "auth_admin_bootstrap_consumed",

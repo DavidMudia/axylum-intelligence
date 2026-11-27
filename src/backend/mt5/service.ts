@@ -417,6 +417,29 @@ export async function listMt5Accounts(ownerUserId: string) {
   });
 }
 
+export async function listMt5Bridges(ownerUserId: string) {
+  const rows = await db.select({
+    id: mt5Bridges.id,
+    name: mt5Bridges.name,
+    status: mt5Bridges.status,
+    terminalVersion: mt5Bridges.terminalVersion,
+    lastHeartbeatAt: mt5Bridges.lastHeartbeatAt,
+    createdAt: mt5Bridges.createdAt,
+  }).from(mt5Bridges)
+    .where(eq(mt5Bridges.ownerUserId, ownerUserId))
+    .orderBy(desc(mt5Bridges.createdAt));
+  const onlineWindow = Date.now() - 60_000;
+  return rows.map((bridge) => ({
+    ...bridge,
+    status: bridge.status === "degraded"
+      ? "degraded"
+      : bridge.status === "online" && bridge.lastHeartbeatAt !== null &&
+          bridge.lastHeartbeatAt.getTime() >= onlineWindow
+        ? "online"
+        : "offline",
+  }));
+}
+
 export async function listMt5TradingData(ownerUserId: string, accountId: string) {
   const [account] = await db.select({
     id: mt5Accounts.id,
@@ -637,7 +660,7 @@ function assertPendingPrice(
 export async function createMt5OrderIntent(ownerUserId: string, request: Mt5OrderRequest) {
   ensureDemoTradingEnabled();
   const operatingState = await getOperatingState();
-  const riskConfig = await getRiskConfig();
+  const riskConfig = await getRiskConfig(ownerUserId);
   const maxSpread = maxSpreadPoints();
   const account = await assertAccountTradable(ownerUserId, request.accountId);
 
@@ -948,7 +971,7 @@ export async function validateMt5BridgePreflight(
   if (request.orderType !== "market") assertPendingPrice(request.side!, request.orderType!, price, bid, ask);
   const counts = await getAccountRiskCounts(intent.accountId, intent.id);
   const operatingState = await getOperatingState();
-  const risk = validateMt5Order(await getRiskConfig(), {
+  const risk = validateMt5Order(await getRiskConfig(intent.ownerUserId), {
     accountType: account.accountType,
     equity: result.equity,
     dayStartEquity: Number(account.dayStartEquity),

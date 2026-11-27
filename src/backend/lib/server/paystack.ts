@@ -4,6 +4,30 @@ import type { EncryptedCredential } from "./exchange-credentials";
 
 type PaystackEnvelope<T> = { status: boolean; data?: T };
 
+const PAYSTACK_CHECKOUT_ENVIRONMENT = [
+  "PAYSTACK_SECRET_KEY",
+  "PAYSTACK_STARTER_PLAN_CODE",
+  "PAYSTACK_PROFESSIONAL_PLAN_CODE",
+  "APP_BASE_URL",
+] as const;
+
+export function getPaystackCheckoutConfiguration(): { available: boolean; missing: string[] } {
+  const missing = PAYSTACK_CHECKOUT_ENVIRONMENT
+    .filter((name) => !process.env[name]?.trim());
+  const baseUrl = process.env.APP_BASE_URL?.trim();
+  if (baseUrl) {
+    try {
+      const url = new URL(baseUrl);
+      if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        missing.push("APP_BASE_URL");
+      }
+    } catch {
+      missing.push("APP_BASE_URL");
+    }
+  }
+  return { available: missing.length === 0, missing: [...new Set(missing)] };
+}
+
 export type PaystackTransaction = {
   id: number;
   status: string;
@@ -17,7 +41,7 @@ export type PaystackTransaction = {
 };
 
 function secretKey(): string {
-  const key = process.env.PAYSTACK_SECRET_KEY;
+  const key = process.env.PAYSTACK_SECRET_KEY?.trim();
   if (!key) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
   return key;
 }
@@ -48,7 +72,7 @@ async function requestPaystack<T>(path: string, init?: RequestInit): Promise<T> 
 export function paystackPlanCode(planId: string): string {
   const envKey = planId === "starter" ? "PAYSTACK_STARTER_PLAN_CODE"
     : planId === "professional" ? "PAYSTACK_PROFESSIONAL_PLAN_CODE" : "";
-  const code = envKey ? process.env[envKey] : undefined;
+  const code = envKey ? process.env[envKey]?.trim() : undefined;
   if (!code) throw new Error(`Paystack monthly plan code is not configured for ${planId}.`);
   return code;
 }

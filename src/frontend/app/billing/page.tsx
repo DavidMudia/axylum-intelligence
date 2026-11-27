@@ -42,6 +42,7 @@ type BillingData = {
     paidAt: string | null;
     receiptUrl: string | null;
   }>;
+  checkoutAvailable: boolean;
   trialAvailable: boolean;
 };
 
@@ -121,6 +122,10 @@ export default function BillingPage() {
   }, [refresh]);
 
   const begin = async (action: "checkout" | "trial", planId: string) => {
+    if (action === "checkout" && !data?.checkoutAvailable) {
+      setError("Paystack checkout is unavailable until a Paystack account and server-side credentials are configured.");
+      return;
+    }
     setBusy(`${action}:${planId}`);
     setError("");
     setNotice("");
@@ -167,6 +172,28 @@ export default function BillingPage() {
     }
   };
 
+  const endTrial = async () => {
+    if (!window.confirm("End your trial now? Your account will return to the Free plan, and this trial cannot be restarted.")) return;
+    setBusy("end_trial");
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "end_trial" }),
+      });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to end your trial");
+      setNotice("Trial ended. Your account is now on the Free plan.");
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const currentPlanName = data?.entitlement.isComplimentary
     ? "Professional — Complimentary Access"
     : data?.entitlement.planName ?? "Loading";
@@ -181,6 +208,11 @@ export default function BillingPage() {
       />
       {error && <div role="alert" className="mb-4 rounded-lg border border-down/30 bg-down/10 px-4 py-3 text-[12px] text-[#ec8696]">{error}</div>}
       {notice && <div role="status" className="mb-4 rounded-lg border border-up/30 bg-up/10 px-4 py-3 text-[12px] text-[#6fd6ad]">{notice}</div>}
+      {data && !data.checkoutAvailable && (
+        <div role="status" className="mb-4 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3 text-[12px] leading-relaxed text-amber-100/80">
+          Paystack checkout is unavailable until a Paystack account and server-side credentials are configured. Trials remain available where shown; starting a trial does not charge you or create a payment record.
+        </div>
+      )}
       {loading ? (
         <p className="text-[13px] text-fg-3">Loading subscription…</p>
       ) : data ? (
@@ -210,6 +242,13 @@ export default function BillingPage() {
                   onClick={() => void manageRenewal(data.subscription!.cancelAtPeriodEnd ? "resume" : "cancel")}
                 >
                   {busy === "cancel" ? "Canceling…" : busy === "resume" ? "Resuming…" : data.subscription.cancelAtPeriodEnd ? "Resume renewal" : "Cancel renewal"}
+                </Button>
+              </div>
+            )}
+            {!data.entitlement.isComplimentary && data.subscription?.source === "trial" && data.subscription.status === "trialing" && (
+              <div className="px-5 pb-5">
+                <Button variant="danger" disabled={Boolean(busy)} onClick={() => void endTrial()}>
+                  {busy === "end_trial" ? "Ending trial…" : "End trial and return to Free"}
                 </Button>
               </div>
             )}
@@ -246,11 +285,11 @@ export default function BillingPage() {
                         <div className="grid gap-2">
                           <Button
                             variant="primary"
-                            disabled={Boolean(busy)}
+                            disabled={Boolean(busy) || !data.checkoutAvailable}
                             onClick={() => void begin("checkout", plan.id)}
                             className="w-full"
                           >
-                            {busy === `checkout:${plan.id}` ? "Connecting to Paystack…" : "Subscribe with Paystack"}
+                            {busy === `checkout:${plan.id}` ? "Connecting to Paystack…" : data.checkoutAvailable ? "Subscribe with Paystack" : "Paystack setup required"}
                           </Button>
                           {data.trialAvailable && plan.trialDays > 0 && (
                             <Button disabled={Boolean(busy)} onClick={() => void begin("trial", plan.id)} className="w-full">

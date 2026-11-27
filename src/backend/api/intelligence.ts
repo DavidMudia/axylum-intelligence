@@ -2,13 +2,13 @@ import { getMarketAnalysis, getRecentDecisions, InsufficientClosedCandlesError }
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+export async function GET(request: Request, ownerUserId: string) {
   const url = new URL(request.url);
   const symbol = url.searchParams.get("symbol") ?? "BTCUSDT";
   const interval = url.searchParams.get("interval") ?? "1m";
   try {
     const { analysis } = await getMarketAnalysis(symbol, interval);
-    const decisions = await getRecentDecisions(25);
+    const decisions = await getRecentDecisions(ownerUserId, 25);
     return Response.json({ analysis, decisions, generatedAt: new Date().toISOString() });
   } catch (error) {
     if (error instanceof InsufficientClosedCandlesError) {

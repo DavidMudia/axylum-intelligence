@@ -1,9 +1,10 @@
 import "dotenv/config";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { mt5Bridges, users } from "@backend/db/schema";
+import { createMt5BridgeToken, hashMt5BridgeToken } from "./bridge-auth";
 
 async function main(): Promise<void> {
   const [emailArgument, nameArgument] = process.argv.slice(2);
@@ -23,13 +24,12 @@ async function main(): Promise<void> {
     if (!owner) throw new Error("The specified account was not found.");
 
     const id = randomUUID();
-    const token = randomBytes(32).toString("hex");
-    const tokenHash = createHash("sha256").update(token, "utf8").digest("hex");
+    const token = createMt5BridgeToken();
     await db.insert(mt5Bridges).values({
       id,
       ownerUserId: owner.id,
       name,
-      tokenHash,
+      tokenHash: hashMt5BridgeToken(token),
       status: "offline",
       updatedAt: new Date(),
     });

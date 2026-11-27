@@ -15,28 +15,6 @@ type AuthUser = { email: string; role: string };
 
 function restrictedPage(role: string | undefined, pathname: string) {
   const isOperator = role === "admin" || role === "owner";
-  if (pathname === "/" && !isOperator) {
-    return {
-      title: "Your Axylum workspace",
-      description: "Market analysis, account connections, and subscription management are available below. Strategy and paper-trading systems are still shared operator-managed resources, not personal accounts.",
-      links: [
-        { href: "/markets", label: "Open markets" },
-        { href: "/intelligence", label: "View intelligence" },
-        { href: "/accounts", label: "Manage accounts" },
-        { href: "/billing", label: "Manage subscription" },
-      ],
-    };
-  }
-  if (!isOperator && (pathname === "/strategy-lab" || pathname === "/trading")) {
-    return {
-      title: "Personal trading workspace unavailable",
-      description: "The current strategy catalog and paper portfolio are shared operator-managed systems. Controls are disabled here to prevent access to shared trading data. User-owned strategy and paper accounts are not yet configured.",
-      links: [
-        { href: "/billing", label: "Review plan access" },
-        { href: "/accounts", label: "Manage integrations" },
-      ],
-    };
-  }
   if (!isOperator && (pathname === "/system" || pathname === "/security")) {
     return {
       title: "Operator-only controls",
@@ -44,11 +22,11 @@ function restrictedPage(role: string | undefined, pathname: string) {
       links: [{ href: "/markets", label: "Return to markets" }],
     };
   }
-  if (role !== "owner" && pathname === "/admin") {
+  if (!isOperator && pathname === "/admin") {
     return {
-      title: "Platform-owner access required",
-      description: "Platform administration is restricted to the explicitly provisioned founder account.",
-      links: [{ href: "/", label: "Return to your workspace" }],
+      title: "Administrator access required",
+      description: "User and subscription administration is restricted to authorized administrators. Complimentary account allocation is available only to the platform owner.",
+      links: [{ href: "/billing", label: "Manage subscription" }],
     };
   }
   return null;
@@ -259,11 +237,6 @@ export function OperatorGate({ children }: { children: ReactNode }) {
           </div>
         </details>
       </div>
-      {user?.role !== "admin" && user?.role !== "owner" && (
-        <div className="border-b hairline bg-white/[0.02] px-4 py-2 text-center text-[11px] text-fg-3">
-          Strategy and paper-trading systems remain operator-managed; they are not personal user accounts.
-        </div>
-      )}
       {restricted ? (
         <main className="mx-auto max-w-[760px] px-4 py-16 text-center">
           <div className="eyebrow">Feature unavailable for this account</div>

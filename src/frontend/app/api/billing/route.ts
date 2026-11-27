@@ -12,10 +12,13 @@ import { getSessionUser } from "@backend/lib/server/user-auth";
 import { resolveEntitlement } from "@backend/lib/server/entitlements";
 import {
   decryptPaystackEmailToken,
+  getPaystackCheckoutConfiguration,
   initializePaystackTransaction,
   setPaystackSubscriptionEnabled,
 } from "@backend/lib/server/paystack";
+import { calculateTrialEndDate } from "@backend/lib/server/subscription-lifecycle";
 import { isSameOriginRequest } from "@backend/lib/server/request-origin";
+import { audit } from "@backend/lib/server/state";
 import { withDatabaseConfiguration } from "@/lib/with-database-configuration";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +73,7 @@ export async function GET(request: Request) {
       subscription: subscription ?? null,
       plans,
       payments: recentPayments,
+      checkoutAvailable: getPaystackCheckoutConfiguration().available,
       trialAvailable: !account?.trialUsedAt && !slot && subscription?.source === "free" && subscription.status === "active",
     }, { headers: { "Cache-Control": "no-store" } });
   });
@@ -112,7 +116,7 @@ export async function POST(request: Request) {
         }
         if (plan.trialDays <= 0) return { error: "Trial is not configured for this plan", status: 409 } as const;
         const now = new Date();
-        const trialEndsAt = new Date(now.getTime() + plan.trialDays * 24 * 60 * 60 * 1000);
+        const trialEndsAt = calculateTrialEndDate(now, plan.trialDays);
         await tx.update(users).set({ trialUsedAt: now, updatedAt: now }).where(eq(users.id, user.id));
         await tx.update(subscriptions).set({
           planId,
@@ -129,6 +133,34 @@ export async function POST(request: Request) {
       });
       if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
       return Response.json({ trial: result }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (body.action === "end_trial") {
+      const result = await db.transaction(async (tx) => {
+        const [subscription] = await tx.select().from(subscriptions)
+          .where(eq(subscriptions.userId, user.id)).for("update").limit(1);
+        if (!subscription || subscription.source !== "trial" || subscription.status !== "trialing") {
+          return { error: "There is no active trial to end", status: 409 } as const;
+        }
+        await tx.update(subscriptions).set({
+          planId: "free",
+          status: "active",
+          source: "free",
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+          trialEndsAt: null,
+          graceEndsAt: null,
+          cancelAtPeriodEnd: false,
+          canceledAt: null,
+          pendingPlanId: null,
+          pendingPlanEffectiveAt: null,
+          updatedAt: new Date(),
+        }).where(eq(subscriptions.id, subscription.id));
+        return { ended: true } as const;
+      });
+      if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
+      await audit(user.id, "subscription.trial_ended", "User ended their trial and returned to Free without a payment.");
+      return Response.json({ planId: "free" }, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (body.action === "cancel" || body.action === "resume") {
@@ -181,6 +213,12 @@ export async function POST(request: Request) {
       const planId = body.planId;
       if (planId !== "starter" && planId !== "professional") {
         return Response.json({ error: "Choose Starter or Professional" }, { status: 400 });
+      }
+      if (!getPaystackCheckoutConfiguration().available) {
+        return Response.json({
+          error: "Paystack checkout is unavailable until a Paystack account and server-side credentials are configured.",
+          code: "paystack_not_configured",
+        }, { status: 503 });
       }
       const entitlement = await resolveEntitlement(user.id);
       if (entitlement.isComplimentary) {
@@ -279,6 +317,6 @@ export async function POST(request: Request) {
         reference: initialized.reference,
       }, { headers: { "Cache-Control": "no-store" } });
     }
-    return Response.json({ error: "Action must be trial, checkout, cancel or resume" }, { status: 400 });
+    return Response.json({ error: "Action must be trial, end_trial, checkout, cancel or resume" }, { status: 400 });
   });
 }

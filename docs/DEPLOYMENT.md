@@ -89,15 +89,16 @@ Suggested starting VPS: 2+ vCPU, 4+ GB RAM and SSD storage sized for retained ca
 
 Vercel can host the Next.js web app and API routes, and Neon can host PostgreSQL. This supports Axylum account registration and sign-in, but Vercel does not run the continuous Binance collector or paper-trading worker. Run those workers on a separate always-on host before expecting live ingestion or autonomous paper trading.
 
+**Paystack is pending account setup and credential configuration.** Checkout is disabled until the required server-side values are present; no payment is initialized or recorded while unavailable. No live transaction or production webhook verification has been performed, and Paystack must not be treated as production-ready.
+
 1. Link the GitHub repository to a Vercel project. Keep the project root at the repository root and leave the Next.js output directory on **Automatic**.
 2. In Vercel **Settings → Environment Variables**, set the following for Production (and Preview only if you intend to use the same Neon database there):
    - `DATABASE_URL` — Neon’s pooled connection URL. This is the app’s runtime connection.
-   - `APP_BASE_URL` — the canonical HTTPS app URL used for Paystack callbacks and receipts.
    - `CRON_SECRET` — a random secret of at least 32 characters for subscription expiration processing.
-   - `PAYSTACK_SECRET_KEY`, `PAYSTACK_STARTER_PLAN_CODE`, and `PAYSTACK_PROFESSIONAL_PLAN_CODE` — server-only Paystack credentials and the matching NGN monthly plans. Configure the Starter plan at ₦5,000/month and Professional at ₦10,000/month; checkout verifies the remote plan amount before creating a transaction.
    - `EXCHANGE_CREDENTIALS_ENCRYPTION_KEY` — canonical base64-encoded 32-byte key used to encrypt saved exchange credentials and Paystack subscription-management tokens.
+   `APP_BASE_URL`, `PAYSTACK_SECRET_KEY`, `PAYSTACK_STARTER_PLAN_CODE`, and `PAYSTACK_PROFESSIONAL_PLAN_CODE` are required only after Paystack account setup. Until then, leave them unset; checkout remains unavailable.
 3. Keep all URLs, API keys, and encryption/cron secrets server-side. Do not use `NEXT_PUBLIC_` or `VITE_` prefixes. Axylum continues to use its existing email/password and role system; the separately enabled Neon Auth service is not the app’s active identity provider.
-4. The checked-in database migrations must be applied to the Neon branch before first use. Review them and test them on a branch first. For future schema changes, set `DATABASE_URL_UNPOOLED` to Neon’s direct connection URL in a trusted local shell and run `npm run db:migrate`. Do not use the pooled URL for migrations.
+4. The configured staging and production Neon branches have migrations 0013–0014 applied and matching migration history through migration 0015. Do not reset either database or rerun those migrations. For a new environment, review and apply all missing checked-in migrations in order, testing them on a disposable branch first. For future schema changes, set `DATABASE_URL_UNPOOLED` to Neon’s direct connection URL in a trusted local shell and run `npm run db:migrate`. Do not use the pooled URL for migrations.
 5. Deploy from the linked GitHub branch. New accounts receive Free access; the first registration is never promoted to administrator or owner. Register the intended founder email, then provision it explicitly from a trusted environment with the direct database URL and both email variables set to the same value:
 
    ```powershell
@@ -109,11 +110,11 @@ Vercel can host the Next.js web app and API routes, and Neon can host PostgreSQL
 
    The command requires the founder account to exist and the migrations (including the five slot rows) to be applied. It promotes only that exact account to platform owner, assigns founder slot 1, and writes an audit event. It is idempotent and refuses to replace a different existing owner. Do not put the founder email or database URL in source control or public logs.
 6. Configure the Paystack webhook URL as `https://<your-domain>/api/billing/paystack/webhook`. The endpoint validates the Paystack signature and verifies successful transactions server-side. `vercel.json` schedules subscription-expiration processing once daily at 00:00 UTC to remain compatible with Vercel Hobby; other hosts should invoke `GET /api/cron/subscriptions` with `Authorization: Bearer <CRON_SECRET>` at least daily. Subscription access is checked against its period/grace timestamps on each request, so delayed status cleanup does not extend access.
-7. Verify sign-up, Free access, a Paystack test-mode checkout and verification, webhook delivery, the founder account, and the owner-only complimentary slot dashboard before enabling live Paystack keys. A trial lasts seven days and must be started by the signed-in user. Complimentary accounts are represented only by slot assignments, not subscription or payment rows.
+7. Paystack setup, when an account is available: create the account and monthly plans in test mode; configure the test secret key, both plan codes, and `APP_BASE_URL`; set the test webhook URL to `https://<your-domain>/api/billing/paystack/webhook`; then verify test-mode initialization, server-side transaction verification, webhook signatures, duplicate delivery handling, and renewal behavior. Do not configure live credentials or attempt production webhook verification until test-mode results and the production setup have been explicitly reviewed. A trial lasts seven days and must be started by the signed-in user. Complimentary accounts are represented only by slot assignments, not subscription or payment rows.
 
 Only server-side environment variables are used by the Vercel runtime. `DATABASE_URL_UNPOOLED` is for trusted migrations and founder provisioning, not a browser variable. Do not configure the local Docker Compose database URL (`@db:5432`) in Vercel.
 
-Subscription billing, complimentary access, billing screens, and user-scoped read-only Binance credential management are implemented in code. Full user-level isolation for the existing shared strategies, backtests, and paper-trading engine is not yet implemented; those legacy APIs are restricted to administrators rather than exposed to ordinary accounts. MT5 bridge self-registration/monitoring and broader user/subscription administration remain outstanding. Switching between active paid plans is blocked to prevent duplicate Paystack subscriptions; a safe scheduled upgrade/downgrade flow is still required. Do not treat Phase 4A as complete until those gaps are closed and tested.
+Subscription billing, complimentary access, account-scoped strategies/backtests/paper trading, user-scoped Binance credentials, MT5 bridge registration, and admin user/subscription controls are implemented in code. The configured staging and production Neon branches both record the same 15 migrations, including 0013–0014; their recorded hashes match the checked-in SQL. Preserve these databases and data. Paystack remains unavailable until an account and credentials are configured, so paid checkout and provider-managed plan changes are intentionally blocked; trials can be started or ended without creating payment records. Do not treat Phase 4A as complete until authenticated multi-account workflows, worker behavior, and deployments are verified.
 
 ## MetaTrader 5 bridge and demo execution
 
@@ -130,9 +131,9 @@ The integration provides owner-scoped account and market data, signed bridge API
 - `GET /api/mt5/accounts` (authenticated, owner-scoped, with broker login masked)
 - `GET` and `POST /api/mt5/orders` (authenticated and owner-scoped)
 
-The bridge token is generated out-of-band by `npm run mt5:bridge:provision -- <account-email> <bridge-name>`. The specified existing Axylum account becomes the bridge owner, allowing separate bridge identities per user. The command prints the token once and stores only its SHA-256 digest in PostgreSQL. Keep the token in a trusted Windows service environment, never in browser code, source control, or chat. Revoke a token with `npm run mt5:bridge:revoke -- <bridge-id>`. MT5 login passwords are not stored by Axylum; the bridge attaches to a terminal already logged into its broker account.
+Professional users can create and monitor their own bridge in **Accounts**. The signed-in owner receives the token once; PostgreSQL stores only its SHA-256 digest. Owners can rotate the token or disconnect the bridge, which invalidates the old token while retaining linked account history. Copy `AXYLUM_API_BASE_URL`, `AXYLUM_BRIDGE_ID`, and `AXYLUM_BRIDGE_TOKEN` into the protected Windows bridge environment. Never put the token in source control, public logs, or chat. The trusted operator commands `npm run mt5:bridge:provision -- <account-email> <bridge-name>` and `npm run mt5:bridge:revoke -- <bridge-id>` remain available for managed operations. MT5 login passwords are not stored by Axylum; the bridge attaches to a terminal already logged into its broker account.
 
-The MT5 schema migrations are additive and leave Binance tables unchanged. Review [migration 0008](../src/backend/db/migrations/0008_harsh_absorbing_man.sql) and [migration 0009](../src/backend/db/migrations/0009_glossy_plazm.sql), back up the database, and apply both using a trusted direct connection before provisioning a bridge. Neither migration is applied automatically; do not run them against production without explicit authorization, review, and backup:
+The MT5 schema migrations are additive and leave Binance tables unchanged. The configured staging and production Neon branches have matching migration histories through 0015. Migrations 0013–0014 add user-owned trading workspaces and the paper-order account/owner constraint; do not rerun them on those branches. For a new environment, review the checked-in migrations, back up the database, and apply every missing migration in order using a trusted direct connection:
 
 ```sh
 npm run db:migrate
@@ -140,13 +141,7 @@ npm run db:migrate
 
 ### Run the Windows bridge
 
-1. Deploy the Axylum web app/API containing the MT5 routes and apply the reviewed migrations. Keep `AXYLUM_MT5_DEMO_TRADING_ENABLED` unset or set to `false` until a demo terminal has been verified. Provision a bridge against the intended database with an administrator account:
-
-   ```powershell
-   npm run mt5:bridge:provision -- admin@example.com "Windows demo terminal"
-   ```
-
-   Run provisioning from a trusted environment with `DATABASE_URL_UNPOOLED` set to the direct Neon URL (or a trusted direct PostgreSQL connection). Save the printed `bridgeId` and one-time `token` directly into the Windows service's protected environment. The token cannot be retrieved later.
+1. Deploy the Axylum web app/API containing the MT5 routes. Keep `AXYLUM_MT5_DEMO_TRADING_ENABLED` unset or set to `false` until a demo terminal has been verified. Sign in with an account that has Professional access, open **Accounts**, register a bridge, and copy the one-time configuration directly into the Windows service's protected environment. The token cannot be retrieved later; rotate it from **Accounts** if it is lost.
 
 2. On the Windows host, install 64-bit Python 3.11+, install MetaTrader 5, and sign in to a **demo** account in the desktop terminal. The bridge does not accept or transmit the broker password.
 
@@ -157,7 +152,7 @@ npm run db:migrate
    .\.venv\Scripts\python.exe -m pip install -r services\mt5-bridge\requirements.txt
    ```
 
-4. Configure the bridge process environment using the bridge ID and token from provisioning:
+4. Configure the bridge process environment using the bridge ID and token shown once in **Accounts**:
 
    ```powershell
    $env:AXYLUM_API_BASE_URL = "https://<your-axylum-domain>"

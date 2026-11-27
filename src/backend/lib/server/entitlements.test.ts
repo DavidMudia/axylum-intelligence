@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { featureDenied, type Entitlement } from "./entitlements";
+import {
+  featureDenied,
+  isSubscriptionAccessCurrent,
+  paperTradingSessionDenialReason,
+  type Entitlement,
+} from "./entitlements";
 
 const free: Entitlement = {
   planId: "free",
@@ -24,6 +29,18 @@ test("entitlement checks allow included features and explicitly deny restricted 
   });
 });
 
+test("paper sessions require an active user and an available entitlement that includes paper trading", () => {
+  const entitled = { ...free, features: { ...free.features, paper_trading: true } };
+  assert.equal(paperTradingSessionDenialReason("active", entitled), null);
+  assert.equal(paperTradingSessionDenialReason("suspended", entitled), "user_not_active");
+  assert.equal(paperTradingSessionDenialReason("active", free), "paper_trading_not_included");
+  assert.equal(paperTradingSessionDenialReason("active", {
+    ...free,
+    status: "unavailable",
+    source: "unavailable",
+  }), "subscription_unavailable");
+});
+
 test("missing billing tables are reported as unavailable instead of granting a plan", async () => {
   const unavailable: Entitlement = {
     planId: "unavailable",
@@ -41,5 +58,30 @@ test("missing billing tables are reported as unavailable instead of granting a p
     code: "subscription_schema_unavailable",
     requiredFeature: "mt5_demo",
   });
+});
+
+test("subscription lifecycle access respects fixed trial, period, cancellation and grace dates", () => {
+  const now = new Date("2025-03-15T12:00:00.000Z");
+  const current = (status: string, values: {
+    currentPeriodEnd?: Date | null;
+    trialEndsAt?: Date | null;
+    graceEndsAt?: Date | null;
+  } = {}) => isSubscriptionAccessCurrent({
+    status,
+    currentPeriodEnd: values.currentPeriodEnd ?? null,
+    trialEndsAt: values.trialEndsAt ?? null,
+    graceEndsAt: values.graceEndsAt ?? null,
+  }, now);
+
+  assert.equal(current("active"), true);
+  assert.equal(current("active", { currentPeriodEnd: new Date("2025-03-16T12:00:00.000Z") }), true);
+  assert.equal(current("active", { currentPeriodEnd: now }), false);
+  assert.equal(current("trialing", { trialEndsAt: new Date("2025-03-16T12:00:00.000Z") }), true);
+  assert.equal(current("trialing", { trialEndsAt: now }), false);
+  assert.equal(current("canceled", { currentPeriodEnd: new Date("2025-03-16T12:00:00.000Z") }), true);
+  assert.equal(current("canceled", { currentPeriodEnd: now }), false);
+  assert.equal(current("past_due", { graceEndsAt: new Date("2025-03-16T12:00:00.000Z") }), true);
+  assert.equal(current("past_due", { graceEndsAt: now }), false);
+  assert.equal(current("expired"), false);
 });
 

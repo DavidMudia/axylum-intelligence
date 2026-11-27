@@ -18,7 +18,7 @@
     "test:mt5": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/mt5/bridge-auth.test.ts src/backend/mt5/validation.test.ts",
     "test:phase2": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/intelligence/indicators.test.ts src/backend/intelligence/risk.test.ts src/backend/intelligence/backtest.test.ts",
     "test:auth": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/operator-auth.test.ts src/backend/lib/server/user-auth.test.ts src/backend/lib/server/exchange-credentials.test.ts src/frontend/lib/auth-response.test.ts",
-    "test:billing": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/paystack.test.ts src/backend/lib/server/entitlements.test.ts src/backend/lib/server/binance-connection.test.ts"
+    "test:billing": "tsx --tsconfig src/frontend/tsconfig.json --test src/backend/lib/server/paystack.test.ts src/backend/lib/server/entitlements.test.ts src/backend/lib/server/subscription-lifecycle.test.ts src/backend/lib/server/binance-connection.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

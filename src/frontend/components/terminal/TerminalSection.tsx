@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { LineChart } from "@/components/charts/LineChart";
 import { Badge, Button, PageHeader, Panel, PanelHeader } from "@/components/glass";
 import { fmtDateTime, fmtPrice, fmtUsd } from "@/lib/format";
@@ -78,6 +79,14 @@ type RiskConfig = {
   slippageRate: number;
 };
 type RiskResponse = { config: RiskConfig };
+type AccessResponse = {
+  entitlement: {
+    planId: string;
+    planName: string;
+    isComplimentary: boolean;
+    features: Record<string, boolean | number>;
+  };
+};
 type HealthResponse = {
   database: { state: string; error?: string };
   collector: { state: string; lastMessageAt: string | null; lastError: string | null; orderBookSequenceHealthy: boolean; reconnectCount: number } | null;
@@ -123,6 +132,8 @@ export function TerminalSection({ section }: { section: Section }) {
   const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState("ema-trend");
   const [notice, setNotice] = useState("");
+  const [access, setAccess] = useState<AccessResponse["entitlement"] | null>(null);
+  const [accessError, setAccessError] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -152,6 +163,18 @@ export function TerminalSection({ section }: { section: Section }) {
       window.clearInterval(timer);
     };
   }, [load]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void getJson<AccessResponse>("/api/billing")
+        .then((result) => {
+          setAccess(result.entitlement);
+          setAccessError("");
+        })
+        .catch((reason: unknown) => setAccessError(reason instanceof Error ? reason.message : String(reason)));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const act = async (url: string, body: unknown) => {
     setWorking(true);
@@ -212,6 +235,7 @@ export function TerminalSection({ section }: { section: Section }) {
       <PageHeader eyebrow={title[section].eyebrow} title={title[section].title} description={title[section].description} />
       {error && <Panel tone="crimson" hover={false} className="p-4 text-[13px] text-fg">{error}</Panel>}
       {notice && <Panel hover={false} className="p-3 text-[12.5px] text-fg-2">{notice}</Panel>}
+      {accessError && <Panel hover={false} className="border border-amber-400/20 bg-amber-400/5 p-3 text-[12px] text-fg-2">Plan permissions could not be loaded: {accessError}</Panel>}
       {loading && !data.market && <Panel hover={false} className="p-5 text-[13px] text-fg-3">Loading persisted market and engine data…</Panel>}
 
       {section === "overview" && (
@@ -245,6 +269,19 @@ export function TerminalSection({ section }: { section: Section }) {
 
       {section === "strategy-lab" && (
         <>
+          {access && (
+            <Panel hover={false} className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <div className="text-[12px] font-medium text-fg">{access.isComplimentary ? "Professional · Complimentary Access" : `${access.planName} plan`}</div>
+                <p className="mt-1 text-[11px] text-fg-3">
+                  {access.features.strategy_builder
+                    ? `Strategy editing is included. ${Number(access.features.backtests_per_day) || 0} backtests per day.`
+                    : `Read-only strategies · ${Number(access.features.backtests_per_day) || 0} backtests per day. Upgrade to edit strategies.`}
+                </p>
+              </div>
+              {!access.features.strategy_builder && <Link href="/billing" className="text-[12px] text-[#9db8f5] hover:underline">View plans</Link>}
+            </Panel>
+          )}
           <Panel hover={false}>
             <PanelHeader eyebrow="Active strategy catalog" title="Versioned, explicit rules" action={<Badge tone="blue">BTCUSDT · Spot · Long-only</Badge>} />
             <div className="divide-y divide-white/[0.06]">
@@ -253,11 +290,11 @@ export function TerminalSection({ section }: { section: Section }) {
                   <div>
                     <div className="flex items-center gap-2 text-[13px] font-medium text-fg">{strategy.name}<Badge>v{strategy.version}</Badge></div>
                     <p className="mt-1 text-[12px] text-fg-3">{strategy.description}</p>
-                    <StrategyRuleEditor strategy={strategy} working={working} onSave={(rules) => void act("/api/strategies", { action: "configure", slug: strategy.slug, rules })} />
+                    <StrategyRuleEditor strategy={strategy} working={working} editable={Boolean(access?.features.strategy_builder)} onSave={(rules) => void act("/api/strategies", { action: "configure", slug: strategy.slug, rules })} />
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge tone={strategy.active ? "emerald" : "neutral"}>{strategy.active ? "Active" : "Inactive"}</Badge>
-                    <Button disabled={working} onClick={() => void act("/api/strategies", { action: "toggle", slug: strategy.slug, active: !strategy.active })}>
+                    <Button disabled={working || !access?.features.strategy_builder} onClick={() => void act("/api/strategies", { action: "toggle", slug: strategy.slug, active: !strategy.active })}>
                       {strategy.active ? "Deactivate" : "Activate"}
                     </Button>
                   </div>
@@ -272,7 +309,7 @@ export function TerminalSection({ section }: { section: Section }) {
                   <option value="ema-trend">EMA Trend Confirmation</option>
                   <option value="rsi-reversal">RSI Support Reversal</option>
                 </select>
-                <Button variant="primary" disabled={working} onClick={() => void runBacktest()}>{working ? "Running…" : "Run backtest"}</Button>
+                <Button variant="primary" disabled={working || !access || !(Number(access.features.backtests_per_day) > 0)} onClick={() => void runBacktest()}>{working ? "Running…" : "Run backtest"}</Button>
               </div>
             } />
             {backtest && <BacktestSummary result={backtest.result} />}
@@ -317,7 +354,11 @@ export function TerminalSection({ section }: { section: Section }) {
               {!data.paper?.portfolio.positions.length && <p className="px-5 pb-5 text-[12px] text-fg-3">No open positions.</p>}
             </Panel>
             <Panel hover={false}>
-              <PanelHeader eyebrow="Risk controls" title="Paper-only limits" action={<Button disabled={working || !riskDraft} onClick={saveRisk}>Save limits</Button>} />
+              <PanelHeader eyebrow="Risk controls" title="Paper-only limits" action={
+                access?.features.advanced_risk
+                  ? <Button disabled={working || !riskDraft} onClick={saveRisk}>Save limits</Button>
+                  : <Link href="/billing" className="text-[11px] text-[#9db8f5] hover:underline">Professional required</Link>
+              } />
               <div className="grid grid-cols-2 gap-3 px-5 pb-5">
                 {([
                   ["maxRiskPerTradePct", "Risk / trade %"],
@@ -328,7 +369,7 @@ export function TerminalSection({ section }: { section: Section }) {
                   ["maxExposurePct", "Max exposure %"],
                 ] as const).map(([field, label]) => (
                   <label key={field} className="text-[11px] text-fg-3">{label}
-                    <input type="number" step="0.1" value={riskDraft?.[field] ?? ""} onChange={(event) => setRiskDraft((config) => config ? { ...config, [field]: Number(event.target.value) } : config)} className="mt-1 w-full rounded-lg border hairline bg-black/30 px-2.5 py-2 text-[12px] text-fg" />
+                    <input type="number" step="0.1" disabled={!access?.features.advanced_risk} value={riskDraft?.[field] ?? ""} onChange={(event) => setRiskDraft((config) => config ? { ...config, [field]: Number(event.target.value) } : config)} className="mt-1 w-full rounded-lg border hairline bg-black/30 px-2.5 py-2 text-[12px] text-fg disabled:cursor-not-allowed disabled:opacity-50" />
                   </label>
                 ))}
                 {data.paper?.portfolio.account.halted && <p className="col-span-2 text-[12px] text-down">Risk engine emergency halt is active.</p>}
@@ -483,7 +524,7 @@ function PositionRow({ position }: { position: Position }) {
   return <div className="grid grid-cols-2 gap-3 px-5 pb-5 text-[12px] sm:grid-cols-3"><Value label="Quantity" value={position.qty.toPrecision(6)} /><Value label="Average entry" value={fmtPrice(position.avgCost)} /><Value label="Live mark" value={fmtPrice(position.mark)} /><Value label="Position value" value={fmtUsd(position.value)} /><Value label="Unrealized P&L" value={fmtUsd(position.unrealized)} /><Value label="Return" value={fmtPct(position.pct)} /></div>;
 }
 
-function StrategyRuleEditor({ strategy, working, onSave }: { strategy: Strategy; working: boolean; onSave: (rules: Record<string, number>) => void }) {
+function StrategyRuleEditor({ strategy, working, editable, onSave }: { strategy: Strategy; working: boolean; editable: boolean; onSave: (rules: Record<string, number>) => void }) {
   const [rules, setRules] = useState(strategy.rules);
   const labels: Record<string, string> = {
     rsiMin: "RSI entry min",
@@ -499,10 +540,10 @@ function StrategyRuleEditor({ strategy, working, onSave }: { strategy: Strategy;
     <div className="mt-3 flex flex-wrap items-end gap-2">
       {Object.entries(rules).filter(([key, value]) => key in labels && typeof value === "number").map(([key, value]) => (
         <label key={key} className="text-[10px] text-fg-3">{labels[key]}
-          <input type="number" step="0.1" value={value} onChange={(event) => setRules((current) => ({ ...current, [key]: Number(event.target.value) }))} className="mt-1 block w-24 rounded-md border hairline bg-black/30 px-2 py-1.5 text-[11px] text-fg" />
+          <input type="number" step="0.1" disabled={!editable} value={value} onChange={(event) => setRules((current) => ({ ...current, [key]: Number(event.target.value) }))} className="mt-1 block w-24 rounded-md border hairline bg-black/30 px-2 py-1.5 text-[11px] text-fg disabled:cursor-not-allowed disabled:opacity-50" />
         </label>
       ))}
-      <Button disabled={working} onClick={() => onSave(rules)}>Save rules</Button>
+      {editable && <Button disabled={working} onClick={() => onSave(rules)}>Save rules</Button>}
     </div>
   );
 }
