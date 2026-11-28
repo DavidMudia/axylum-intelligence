@@ -1,10 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "src/frontend/app/api/accounts/binance/route.ts": {
-      "regions": ["fra1"]
-    }
-  },
+  "regions": ["fra1"],
   "crons": [
     {
       "path": "/api/cron/subscriptions",
