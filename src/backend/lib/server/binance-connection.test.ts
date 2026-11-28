@@ -26,3 +26,24 @@ test("Binance credential validation sends the key in a header and rejects tradin
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Binance regional restrictions and rejected signatures return actionable client-safe statuses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(null, { status: 451 });
+    await assert.rejects(
+      validateBinanceReadOnlyCredentials("example-api-key", "example-api-secret"),
+      (error: unknown) => error instanceof BinanceConnectionError &&
+        error.status === 503 && /server region/.test(error.message),
+    );
+
+    globalThis.fetch = async () => new Response(null, { status: 400 });
+    await assert.rejects(
+      validateBinanceReadOnlyCredentials("example-api-key", "example-api-secret"),
+      (error: unknown) => error instanceof BinanceConnectionError &&
+        error.status === 400 && /rejected/.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

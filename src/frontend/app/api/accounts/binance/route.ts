@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "@backend/db";
 import { exchangeConnections } from "@backend/db/schema";
-import { decryptExchangeCredential, encryptExchangeCredential } from "@backend/lib/server/exchange-credentials";
+import {
+  assertExchangeCredentialEncryptionConfigured,
+  decryptExchangeCredential,
+  encryptExchangeCredential,
+  ExchangeCredentialConfigurationError,
+} from "@backend/lib/server/exchange-credentials";
 import { BinanceConnectionError, validateBinanceReadOnlyCredentials } from "@backend/lib/server/binance-connection";
 import { getSessionUser } from "@backend/lib/server/user-auth";
 import { isSameOriginRequest } from "@backend/lib/server/request-origin";
@@ -91,6 +96,18 @@ export async function POST(request: Request) {
     }
 
     try {
+      assertExchangeCredentialEncryptionConfigured();
+    } catch (error) {
+      if (error instanceof ExchangeCredentialConfigurationError) {
+        return Response.json({
+          error: "Encrypted credential storage is not configured correctly.",
+          code: "credential_encryption_unavailable",
+        }, { status: 503 });
+      }
+      throw error;
+    }
+
+    try {
       await validateBinanceReadOnlyCredentials(body.apiKey, body.apiSecret);
     } catch (error) {
       if (error instanceof BinanceConnectionError) {
@@ -100,8 +117,20 @@ export async function POST(request: Request) {
     }
 
     const id = randomUUID();
-    const encryptedKey = encryptExchangeCredential(body.apiKey, `exchange:${id}:api-key`);
-    const encryptedSecret = encryptExchangeCredential(body.apiSecret, `exchange:${id}:api-secret`);
+    let encryptedKey;
+    let encryptedSecret;
+    try {
+      encryptedKey = encryptExchangeCredential(body.apiKey, `exchange:${id}:api-key`);
+      encryptedSecret = encryptExchangeCredential(body.apiSecret, `exchange:${id}:api-secret`);
+    } catch (error) {
+      if (error instanceof ExchangeCredentialConfigurationError) {
+        return Response.json({
+          error: "Encrypted credential storage is not configured correctly.",
+          code: "credential_encryption_unavailable",
+        }, { status: 503 });
+      }
+      throw error;
+    }
     try {
       const [connection] = await db.insert(exchangeConnections).values({
         id,
@@ -129,7 +158,15 @@ export async function POST(request: Request) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
         return Response.json({ error: "A Binance connection with this label already exists" }, { status: 409 });
       }
-      throw error;
+      const databaseErrorCode = typeof error === "object" && error !== null && "code" in error &&
+        typeof error.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)
+        ? error.code
+        : "unknown";
+      console.error("Could not persist encrypted Binance credentials.", { databaseErrorCode });
+      return Response.json({
+        error: "Binance validated the credentials, but Axylum could not save the encrypted connection.",
+        code: "binance_connection_persistence_failed",
+      }, { status: 503 });
     }
   });
 }

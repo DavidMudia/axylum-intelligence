@@ -29,6 +29,15 @@ export async function validateBinanceReadOnlyCredentials(apiKey: string, apiSecr
     if (response.status === 401 || response.status === 403) {
       throw new BinanceConnectionError(400, "Binance rejected the API credentials.");
     }
+    if (response.status === 400) {
+      throw new BinanceConnectionError(400, "Binance rejected the API credentials or signed request.");
+    }
+    if (response.status === 451) {
+      throw new BinanceConnectionError(503, "Binance is unavailable from this server region.");
+    }
+    if (response.status === 418 || response.status === 429) {
+      throw new BinanceConnectionError(503, "Binance is temporarily rate-limiting credential validation.");
+    }
     throw new BinanceConnectionError(502, `Binance credential validation failed (HTTP ${response.status}).`);
   }
 

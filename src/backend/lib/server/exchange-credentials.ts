@@ -12,14 +12,29 @@ export type EncryptedCredential = {
   version: number;
 };
 
+export class ExchangeCredentialConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExchangeCredentialConfigurationError";
+  }
+}
+
 function getEncryptionKey(): Buffer {
   const encoded = process.env.EXCHANGE_CREDENTIALS_ENCRYPTION_KEY;
-  if (!encoded) throw new Error("EXCHANGE_CREDENTIALS_ENCRYPTION_KEY is required to store exchange credentials.");
+  if (!encoded) {
+    throw new ExchangeCredentialConfigurationError("EXCHANGE_CREDENTIALS_ENCRYPTION_KEY is required to store exchange credentials.");
+  }
   const key = Buffer.from(encoded, "base64");
   if (key.length !== KEY_BYTES || key.toString("base64") !== encoded) {
-    throw new Error("EXCHANGE_CREDENTIALS_ENCRYPTION_KEY must be a canonical base64-encoded 32-byte key.");
+    throw new ExchangeCredentialConfigurationError(
+      "EXCHANGE_CREDENTIALS_ENCRYPTION_KEY must be a canonical base64-encoded 32-byte key.",
+    );
   }
   return key;
+}
+
+export function assertExchangeCredentialEncryptionConfigured(): void {
+  getEncryptionKey();
 }
 
 export function encryptExchangeCredential(plaintext: string, context: string): EncryptedCredential {
