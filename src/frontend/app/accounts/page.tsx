@@ -273,7 +273,7 @@ export default function AccountsPage() {
             <label className="text-[11px] text-fg-3">Binance API secret
               <input required type="password" autoComplete="new-password" value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-lg border hairline bg-black/30 px-3 text-[12px] text-fg outline-none focus:border-accent/40" />
             </label>
-            <p className="text-[10.5px] leading-relaxed text-fg-4">Use a dedicated read-only key. Axylum rejects keys that report trading or withdrawal permissions. Credentials are encrypted server-side and never returned to the browser.</p>
+            <p className="text-[10.5px] leading-relaxed text-fg-4">Use a dedicated read-only key with reading enabled and trading, withdrawal, and transfer permissions disabled. Credentials are encrypted server-side and never returned to the browser.</p>
             <Button type="submit" variant="primary" disabled={busy || !label.trim() || !apiKey || !apiSecret}>
               {busy ? "Validating…" : "Validate and connect"}
             </Button>

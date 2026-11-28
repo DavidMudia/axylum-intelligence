@@ -16,7 +16,7 @@ export async function validateBinanceReadOnlyCredentials(apiKey: string, apiSecr
 
   let response: Response;
   try {
-    response = await fetch(`https://api.binance.com/api/v3/account?${query}`, {
+    response = await fetch(`https://api.binance.com/sapi/v1/account/apiRestrictions?${query}`, {
       headers: { "X-MBX-APIKEY": apiKey },
       signal: AbortSignal.timeout(10_000),
       cache: "no-store",
@@ -41,13 +41,26 @@ export async function validateBinanceReadOnlyCredentials(apiKey: string, apiSecr
     throw new BinanceConnectionError(502, `Binance credential validation failed (HTTP ${response.status}).`);
   }
 
-  let account: { canTrade?: unknown; canWithdraw?: unknown };
+  let permissions: Record<string, unknown>;
   try {
-    account = await response.json() as typeof account;
+    permissions = await response.json() as Record<string, unknown>;
   } catch {
-    throw new BinanceConnectionError(502, "Binance returned an invalid account response.");
+    throw new BinanceConnectionError(502, "Binance returned an invalid API-key permissions response.");
   }
-  if (account.canTrade !== false || account.canWithdraw !== false) {
-    throw new BinanceConnectionError(400, "Use a read-only Binance key with trading and withdrawal permissions disabled.");
+
+  const restrictedPermissions = [
+    "enableSpotAndMarginTrading",
+    "enableMargin",
+    "enableFutures",
+    "enableVanillaOptions",
+    "enableWithdrawals",
+    "enableInternalTransfer",
+    "permitsUniversalTransfer",
+  ];
+  if (permissions.enableReading !== true || restrictedPermissions.some((permission) => permissions[permission] !== false)) {
+    throw new BinanceConnectionError(
+      400,
+      "Use a read-only Binance key with reading enabled and all trading, withdrawal, and transfer permissions disabled.",
+    );
   }
 }
